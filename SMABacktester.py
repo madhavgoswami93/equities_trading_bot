@@ -62,10 +62,11 @@ class SMABacktester:
     def get_data(self):
         """ Retrieves and prepares the data.
         """
-        raw = pd.read_csv("forex_pairs.csv", parse_dates=["Date"], index_col="Date")
-        raw = raw[self.symbol].to_frame().dropna()
-        raw = raw.loc[self.start : self.end]
-        raw.rename(columns={self.symbol: "price"}, inplace=True)
+        stock = FI.FinancialInstrument(self.symbol)
+        stock.get_data_extended("2019-01-01", "day")
+        raw = stock.data_df
+        raw = raw["close"].to_frame().dropna()
+        raw.rename(columns={"close": "price"}, index={"date": "time"}, inplace=True)
         raw["returns"] = np.log(raw / raw.shift(1))
         raw["SMA_S"] = raw["price"].rolling(self.SMA_S).mean()
         raw["SMA_L"] = raw["price"].rolling(self.SMA_L).mean()
@@ -130,4 +131,19 @@ class SMABacktester:
         """
         opt = brute(self.update_and_run, (SMA1_range, SMA2_range), finish=None)
         return opt, -self.update_and_run(opt)
+
+
+if __name__ == "__main__":
+    symbol = "DMART"
+    tester = SMABacktester(symbol, 50, 200, "2010-01-01", "2020-06-30")
+
+    performance, outperformance_buy_hold = tester.test_strategy()
+    print("strategy performance: ", performance)
+    print("outperformance from buy and hold: ", outperformance_buy_hold)
+
+    tester.optimize_parameters((25, 100, 1), (1, 5, 1))
+
+    performance, outperformance_buy_hold = tester.test_strategy()
+    print("strategy performance: ", performance)
+    print("outperformance from buy and hold: ", outperformance_buy_hold)
 

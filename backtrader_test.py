@@ -5,9 +5,9 @@ import backtrader as bt
 import pandas as pd
 import pyfolio as pf
 
-import src.FinancialInstrument as FI
-from src.orb_strategy import OpeningRangeBreakout
-from src.strategies import ProphetStrategy, TestStrategy
+import FinancialInstrument as FI
+from orb_strategy import OpeningRangeBreakout
+from strategies import ProphetStrategy, TestStrategy
 
 if __name__ == "__main__":
     # Create a cerebro entity

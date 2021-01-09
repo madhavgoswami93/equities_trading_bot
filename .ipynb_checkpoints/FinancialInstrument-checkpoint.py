@@ -6,6 +6,10 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
+cwd = os.
+cwd = os.chdir("/home/madhav/Documents/github/equities_trading_bot/sensitive")
+instrument_df_loc = "/home/madhav/Documents/github/equities_trading_bot/sensitive/nse_tickers.csv"
+
 
 class FinancialInstrument:
     def __init__(
@@ -24,10 +28,8 @@ class FinancialInstrument:
         )
 
     def get_access(self):
-        cwd = os.path.join(os.getcwd(), "sensitive")
-        instrument_df_loc = os.path.join(cwd, "nse_tickers.csv")
-        access_token = open(os.path.join(cwd, "access_token.txt"), "r").read()
-        key_secret = open(os.path.join(cwd, "api_key.txt"), "r").read().split()
+        access_token = open("access_token.txt", "r").read()
+        key_secret = open("api_key.txt", "r").read().split()
         kite = KiteConnect(api_key=key_secret[0])
         kite.set_access_token(access_token)
         instrument_df = pd.read_csv(instrument_df_loc)
