@@ -37,6 +37,21 @@ class Result:
             self._stats = s
         return self._stats
 
+    def by_strategy(self) -> pd.DataFrame:
+        """Contribution of each strategy inside the shared portfolio."""
+        if self.trades.empty:
+            return pd.DataFrame()
+        g = self.trades.groupby("strategy")
+        return pd.DataFrame({
+            "trades": g.size(),
+            "win_rate": g["pnl"].apply(lambda x: (x > 0).mean()),
+            "pnl": g["pnl"].sum(),
+            "avg_return_pct": g["return_pct"].mean(),
+            "expectancy_r": g["r_multiple"].mean(),
+            "avg_hold": g["bars_held"].mean(),
+            "costs": g["costs"].sum(),
+        }).sort_values("pnl", ascending=False)
+
     def by_symbol(self) -> pd.DataFrame:
         """Per-stock breakdown (the old per-ticker result_df, from the trade list)."""
         if self.trades.empty:
@@ -68,7 +83,7 @@ class Result:
         pct = lambda k: f"{s[k] * 100:8.2f}%" if isinstance(s.get(k), (int, float)) and np.isfinite(s[k]) else "      n/a"
         num = lambda k, d=2: f"{s[k]:9.{d}f}" if isinstance(s.get(k), (int, float)) and np.isfinite(s[k]) else "      n/a"
         lines = [
-            f"Strategy      {self.strategy}  {self.params}",
+            f"Strategies    {self.strategy}",
             f"Period        {s.get('start')} -> {s.get('end')}",
             f"Final equity  {s.get('final_equity', 0):,.0f}",
             f"Total return {pct('total_return')}   CAGR {pct('cagr')}   Vol {pct('volatility')}",
@@ -82,6 +97,8 @@ class Result:
         ]
         if "benchmark_cagr" in s:
             lines.append(f"Benchmark    CAGR {pct('benchmark_cagr')}   max DD {pct('benchmark_max_dd')}")
+        if self.trades["strategy"].nunique() > 1:
+            lines += ["", "By strategy:", self.by_strategy().round(3).to_string()]
         return "\n".join(lines)
 
     def save(self, out_dir: str | Path) -> Path:
@@ -91,6 +108,7 @@ class Result:
                       "positions": self.positions}).to_csv(out / "equity.csv")
         self.trades.to_csv(out / "trades.csv", index=False)
         self.by_symbol().to_csv(out / "by_symbol.csv")
+        self.by_strategy().to_csv(out / "by_strategy.csv")
         (out / "stats.json").write_text(json.dumps(
             {"strategy": self.strategy, "params": self.params, **self.stats}, indent=2, default=str))
         return out

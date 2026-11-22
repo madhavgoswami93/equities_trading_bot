@@ -1,8 +1,7 @@
-"""Parameter sweeps and walk-forward analysis.
+"""Parameter sweeps and walk-forward analysis for one strategy of the file.
 
 Sweeps run in parallel processes. On Linux/macOS the panel is shared with the
-workers through fork (copy-on-write), so a 500-stock x 20-year panel is not
-pickled once per job.
+workers through fork (copy-on-write), so a big panel is not pickled per job.
 """
 
 from __future__ import annotations
@@ -16,9 +15,9 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from ..config import RiskConfig, StrategySpec
 from ..panel import Panel
-from ..strategies.base import Strategy
-from .backtest import Backtest, EngineConfig
+from .backtest import Backtest
 
 _SHARED: dict = {}
 
@@ -30,8 +29,8 @@ def param_grid(grid: dict[str, list]) -> list[dict]:
 
 def _run_one(args):
     params, windows = args
-    panel, strategy, config = _SHARED["panel"], _SHARED["strategy"], _SHARED["config"]
-    bt = Backtest(panel, strategy.with_params(**params), config)
+    panel, spec, risk = _SHARED["panel"], _SHARED["spec"], _SHARED["risk"]
+    bt = Backtest(panel, [spec.with_params(**params)], risk)
     out = []
     for start, end in windows:
         try:
@@ -50,10 +49,10 @@ def _map(jobs, workers: int | None):
         return list(ex.map(_run_one, jobs, chunksize=max(1, len(jobs) // (workers * 4))))
 
 
-def sweep(panel: Panel, strategy: Strategy, grid: dict[str, list], config: EngineConfig | None = None,
+def sweep(panel: Panel, spec, grid: dict[str, list], risk: RiskConfig | None = None,
           start=None, end=None, workers: int | None = None, sort_by: str = "sharpe") -> pd.DataFrame:
-    """Backtest every combination in `grid`; returns one row per combination."""
-    _SHARED.update(panel=panel, strategy=strategy, config=config or EngineConfig())
+    """Backtest every combination in `grid`; one row per combination."""
+    _SHARED.update(panel=panel, spec=StrategySpec.wrap(spec), risk=risk or RiskConfig())
     try:
         res = _map([(p, [(start, end)]) for p in param_grid(grid)], workers)
     finally:
@@ -64,8 +63,8 @@ def sweep(panel: Panel, strategy: Strategy, grid: dict[str, list], config: Engin
 
 @dataclass
 class WalkForwardResult:
-    folds: pd.DataFrame  # one row per fold: chosen params, in-sample & out-of-sample metrics
-    oos_equity: pd.Series  # stitched out-of-sample equity curve
+    folds: pd.DataFrame
+    oos_equity: pd.Series
 
     def summary(self) -> str:
         from .metrics import equity_stats
@@ -73,49 +72,48 @@ class WalkForwardResult:
         s = equity_stats(self.oos_equity)
         return (f"Walk-forward: {len(self.folds)} folds, OOS {s.get('start')} -> {s.get('end')}\n"
                 f"OOS CAGR {s.get('cagr', np.nan):.2%}  Sharpe {s.get('sharpe', np.nan):.2f}  "
-                f"MaxDD {s.get('max_drawdown', np.nan):.2%}\n\n"
-                + self.folds.to_string(index=False))
+                f"MaxDD {s.get('max_drawdown', np.nan):.2%}\n\n" + self.folds.to_string(index=False))
 
 
-def walk_forward(panel: Panel, strategy: Strategy, grid: dict[str, list], config: EngineConfig | None = None,
+def walk_forward(panel: Panel, spec, grid: dict[str, list], risk: RiskConfig | None = None,
                  train_years: float = 3, test_years: float = 1, metric: str = "sharpe",
                  min_trades: int = 30, workers: int | None = None) -> WalkForwardResult:
-    """Rolling walk-forward: optimise on `train_years`, trade the best params on
-    the following `test_years`, roll forward by `test_years`, repeat."""
-    config = config or EngineConfig()
-    d0, d_end = panel.dates[0], panel.dates[-1]
+    """Optimise on `train_years`, trade the best params on the next `test_years`, roll, repeat."""
+    risk = risk or RiskConfig()
+    spec = StrategySpec.wrap(spec)
+    d_end = panel.dates[-1]
     windows = []
-    train_start = d0 + pd.DateOffset(days=365)  # leave a year for indicator warm-up
+    train_start = panel.dates[0] + pd.DateOffset(days=365)  # a year of indicator warm-up
     while True:
         train_end = train_start + pd.DateOffset(days=int(365 * train_years))
-        test_end = train_end + pd.DateOffset(days=int(365 * test_years))
         if train_end >= d_end:
             break
+        test_end = train_end + pd.DateOffset(days=int(365 * test_years))
         windows.append((train_start, train_end, train_end + pd.Timedelta(days=1), min(test_end, d_end)))
         train_start += pd.DateOffset(days=int(365 * test_years))
     if not windows:
         raise ValueError("not enough history for a single walk-forward fold")
 
-    combos = param_grid(grid)
-    _SHARED.update(panel=panel, strategy=strategy, config=config)
+    _SHARED.update(panel=panel, spec=spec, risk=risk)
     try:
-        # every combo is evaluated on every train window in a single parallel pass
-        res = _map([(p, [(w[0], w[1]) for w in windows]) for p in combos], workers)
+        res = _map([(p, [(w[0], w[1]) for w in windows]) for p in param_grid(grid)], workers)
     finally:
         _SHARED.clear()
 
+    def score(s):
+        v = s.get(metric, np.nan)
+        return v if np.isfinite(v) else -np.inf
+
     rows, pieces = [], []
     for k, (tr_s, tr_e, te_s, te_e) in enumerate(windows):
-        cands = [(p, s[k]) for p, s in res if s[k].get("trades", 0) >= min_trades and np.isfinite(s[k].get(metric, np.nan))]
-        if not cands:
-            cands = [(p, s[k]) for p, s in res]
-        best_p, best_s = max(cands, key=lambda x: x[1].get(metric, -np.inf) if np.isfinite(x[1].get(metric, np.nan)) else -np.inf)
-        oos = Backtest(panel, strategy.with_params(**best_p), config).run(te_s, te_e)
-        o = oos.stats
+        cands = [(p, s[k]) for p, s in res if s[k].get("trades", 0) >= min_trades] or [(p, s[k]) for p, s in res]
+        best_p, best_s = max(cands, key=lambda x: score(x[1]))
+        o = Backtest(panel, [spec.with_params(**best_p)], risk).run(te_s, te_e)
         rows.append({"train": f"{tr_s.date()}..{tr_e.date()}", "test": f"{te_s.date()}..{te_e.date()}", **best_p,
-                     f"is_{metric}": best_s.get(metric), "oos_cagr": o.get("cagr"), "oos_sharpe": o.get("sharpe"),
-                     "oos_max_dd": o.get("max_drawdown"), "oos_trades": o.get("trades")})
-        pieces.append(oos.equity.pct_change().fillna(0.0))
+                     f"is_{metric}": best_s.get(metric), "oos_cagr": o.stats.get("cagr"),
+                     "oos_sharpe": o.stats.get("sharpe"), "oos_max_dd": o.stats.get("max_drawdown"),
+                     "oos_trades": o.stats.get("trades")})
+        pieces.append(o.equity.pct_change().fillna(0.0))
     rets = pd.concat(pieces)
     rets = rets[~rets.index.duplicated()]
-    return WalkForwardResult(pd.DataFrame(rows), config.initial_cash * (1 + rets).cumprod())
+    return WalkForwardResult(pd.DataFrame(rows), risk.capital * (1 + rets).cumprod())

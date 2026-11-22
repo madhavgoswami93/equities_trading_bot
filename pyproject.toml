@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "swingbot"
-version = "0.1.0"
-description = "Fast, look-ahead-safe swing-trading backtester for NSE equities (Zerodha Kite / Groww / Yahoo data)"
+version = "0.2.0"
+description = "Swing-trading engine for NSE equities: one strategy file -> backtest, paper, live (Zerodha Kite)"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.26",
     "pandas>=2.1",
@@ -35,4 +35,4 @@ markers = ["slow: runs the engine without numba in a subprocess"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py310"
+target-version = "py311"

@@ -1,144 +1,184 @@
 # equities_trading_bot — `swingbot`
 
-A swing-trading research and backtesting engine for NSE equities, built for
-holding periods from **1 day to about 3 weeks**. It is fast and designed so that
-future data cannot leak into a backtest.
+Swing trading for NSE equities, with holds from 1 day to about 3 weeks. **One strategy file, one engine,
+three modes:**
 
-* **Fast**: 500 stocks × 20 years (2.5M bars) simulates in about 45 ms after the
-  first compile. A 24-combination parameter sweep on Nifty 50 takes under a second.
-* **Honest fills**: a signal at the close is filled at the next open. Stops that
-  gap through fill at the open, not at the stop price. When the stop and the
-  target are both hit on one bar, the engine assumes the stop came first.
-* **Real Indian costs**: STT, exchange, SEBI, stamp duty, GST and DP charges, with
-  presets for Zerodha and Groww, plus slippage.
-* **Portfolio-level**: risk-based position sizing, a maximum number of positions,
-  signal ranking when there are more signals than free slots, a per-position
-  cap, a liquidity cap (% of average daily value) and a Nifty regime filter.
-* **Research tooling**: parallel parameter sweeps, rolling walk-forward
-  optimisation, per-symbol breakdowns, monthly returns, and CSV/JSON/PNG output.
-* **Data**: Zerodha Kite Connect, Groww Trade API and Yahoo Finance (free). Data is
-  cached locally as Parquet and updated incrementally.
+```
+strategies.toml ──► backtest ──► paper (live data, simulated fills) ──► live (real orders)
+                      ▲              ▲                                     ▲
+                      └──────── the same jitted engine core ───────────────┘
+```
 
-## Broker APIs (status as of Nov 2026)
+* **Strategies live in a TOML file.** Write signals and quantities as expressions such as
+  `entry = "close > sma(close, 200) and rsi(close, 3) < 5"` and `quantity = "risk 1%"`. You can
+  run any number of strategies together as one portfolio.
+* **Risk rules apply to every strategy.** By default you hold at most **5 open positions**,
+  no single position can exceed **40% of equity**, and trades are sized by risk per trade. A
+  liquidity cap, an entry-gap limit, a drawdown circuit breaker, and per-strategy caps and
+  priorities are also available.
+* **Paper trading matches the backtest.** Paper trading runs the same engine one day at a
+  time on live data. A test replays 500 sessions this way and gets the same trades as the
+  backtest.
+* **Live trading** uses Zerodha Kite. Entries are AMO limit orders at the next open, exits are
+  AMO market orders, and stops are GTT orders. It starts in dry-run mode.
+* **Speed:** 500 stocks × 20 years × 3 strategies simulates in about 30 ms after the first compile.
+  Parameter sweeps run in parallel.
 
-| | Zerodha Kite Connect | Groww Trade API |
+## Cheapest setup: ₹0 per month
+
+Daily-bar swing trading only needs end-of-day candles, which are free:
+
+| Need | Free option | Paid alternative |
 |---|---|---|
-| Orders / portfolio | Free "Personal" plan | Paid plan |
-| Historical candles | "Connect" plan, about ₹500/month per app (historical data included) | Paid plan, about ₹499/month + GST |
-| Daily history depth | Many years (2000 days per request, chunked automatically) | Equities from **2020** (180 days per request on `get_historical_candles`) |
-| Python SDK | `kiteconnect` | `growwapi` |
-| Auth | Daily access token (`swingbot kite-login`) | TOTP or API key + secret (daily approval) |
-| Notes | Static IP required for API orders since Apr 2026 | Rate limits per category (orders 10/s) |
+| Research and backtests | **Yahoo Finance** (`provider = "yahoo"`): 15+ years, split-adjusted | Kite Connect (about ₹500/month) |
+| Paper trading | **Yahoo** EOD after 15:45 IST | — |
+| Live orders | **Zerodha Kite "Personal" API**: orders, GTT and portfolio endpoints are free | — |
+| Free historical data APIs | **Angel One SmartAPI** and **Fyers API** are free for account holders | Groww (about ₹499/month, data only from 2020), Dhan data (about ₹499/month) |
 
-**Recommendation:** use **Yahoo** (free) to research strategies with 15+ years of history. Use
-**Kite** as the authoritative data and the broker for live trading. Groww's history
-only starts in 2020, which is too short for robust swing backtests, but works as a
-second data source or broker. Pricing changes often, so check
-[zerodha.com/charges](https://zerodha.com/charges) and the
-[Groww Trade API docs](https://groww.in/trade-api/docs) before you subscribe.
+**Recommended:** Yahoo for data plus Kite Personal for orders. Zerodha delivery brokerage is
+₹0, and the API costs ₹0. Kite has required a static IP for API orders since April 2026. Broker
+pricing changes often, so check each broker's own page before you subscribe.
 
 ## Quick start
 
 ```bash
-pip install -e ".[yahoo,plot,dev]"      # add kite / groww extras when needed
-
-python -m swingbot fetch --provider yahoo --universe nifty50 --start 2008-01-01
-python -m swingbot backtest -s pullback --start 2010-01-01 --out results/pullback
-python -m swingbot backtest -s breakout -p lookback=55 -p atr_trail=4 --costs groww
-python -m swingbot sweep -s pullback -g rsi_entry=5,10,15 -g max_hold=5,10,15 -g atr_stop=2,3
-python -m swingbot walkforward -s pullback -g rsi_entry=5,10,20 -g max_hold=5,10,15
-python -m swingbot scan -s breakout       # today's candidates with stop and quantity
-python -m swingbot bench                  # engine speed on synthetic data
-pytest -q
+pip install -e ".[yahoo,plot,dev]"            # Python 3.11+; add [kite] for live trading
+python -m swingbot init strategies.toml       # commented template
+python -m swingbot fetch strategies.toml      # download / refresh daily candles (cached as Parquet)
+python -m swingbot backtest strategies.toml   # all enabled strategies as one portfolio
 ```
 
-With Kite: copy `.env.example` to `.env`, fill in your key and secret, run
-`python -m swingbot kite-login` each morning, then use `--provider kite`. With Groww,
-use `--provider groww --benchmark-provider yahoo`, because Groww has no Nifty index
-candles in this adapter.
+Then promote the same file through the stages:
 
-### Python API
+```bash
+# 1. research
+python -m swingbot backtest    strategies.toml --start 2012-01-01
+python -m swingbot sweep       strategies.toml --strategy trend_dip -g rsi_entry=3,5,10 -g max_hold=10,15
+python -m swingbot walkforward strategies.toml --strategy trend_dip -g rsi_entry=3,5,10 -g max_hold=10,15
 
-```python
-from swingbot import Backtest, EngineConfig, CostModel, TrendPullback
-from swingbot.data import load_panel, load_universe
+# 2. paper: run once a day after the close (cron 16:15 IST, Mon-Fri)
+python -m swingbot paper strategies.toml                 # updates data, fills, decides tomorrow's orders
+python -m swingbot paper strategies.toml --start 2026-06-01 --reset   # replay paper from a date
+python -m swingbot status strategies.toml
 
-panel = load_panel("yahoo", load_universe("nifty50"), benchmark="^NSEI")
-cfg = EngineConfig(initial_cash=10_00_000, risk_per_trade=0.01, max_positions=8, costs=CostModel.zerodha())
-res = Backtest(panel, TrendPullback(rsi_entry=5, max_hold=15), cfg).run(start="2012-01-01")
-print(res.summary())
-res.trades.head(); res.by_symbol(); res.monthly_returns(); res.plot()
+# 3. live (Zerodha Kite): dry run until you set `dry_run = false` AND pass --send
+python -m swingbot kite-login                            # each morning: today's access token
+python -m swingbot live strategies.toml --phase open --send    # ~09:20: sync fills, place GTT stops
+python -m swingbot live strategies.toml --send                 # ~15:45: sync, decide, send AMOs for tomorrow
 ```
+
+Example cron entries (server clock in IST):
+
+```
+15 16 * * 1-5  cd ~/equities_trading_bot && python -m swingbot paper strategies.toml >> runs/paper.log 2>&1
+```
+
+## The strategy file
+
+```toml
+[risk]
+capital = 1000000
+max_positions = 5          # never more than 5 open positions, across all strategies
+max_position_pct = 0.40    # no single position above 40% of equity
+risk_per_trade = 0.01
+max_entry_gap = 0.05       # entry is a limit at close +5%
+max_drawdown_halt = 0.15   # pause new entries 20 sessions when 15% below peak
+costs = "zerodha"
+
+[[strategy]]
+name = "trend_dip"
+type = "rules"
+entry = "close > sma(close, 200) and sma(close, 50) > sma(close, 200) and rsi(close, 3) < rsi_entry"
+exit  = "rsi(close, 3) > 70"
+stop  = "3 * atr(14)"           # initial stop distance (Rs) below the fill
+score = "roc(close, 126)"       # ranking when signals exceed free slots
+quantity = "risk 1%"            # or "equity 20%" | "shares 50" | "amount 100000"
+max_hold = 15                   # time stop, about 3 weeks
+priority = 1
+params = { rsi_entry = 5 }      # names usable in expressions, and sweepable
+
+[[strategy]]
+name = "volume_breakout"
+type = "rules"
+entry = "close > prev(highest(high, 20)) and volume > 1.5 * avg_volume(20) and close > sma(close, 50)"
+stop  = "2 * atr(14)"
+trail = "3 * atr(14)"
+quantity = "equity 20%"
+priority = 2
+max_positions = 2               # at most 2 of the 5 slots
+```
+
+See [`strategies.example.toml`](strategies.example.toml) for every option. Expressions are
+parsed with an allow-list, so a strategy file cannot run arbitrary code.
+Available functions: `sma ema rsi roc atr highest lowest prev avg_volume turnover supertrend
+supertrend_dir crossover crossunder max min abs`. Built-in Python strategies (`pullback`,
+`breakout`, `supertrend`) can also be used with `type = "..."`.
+
+### How a quantity becomes an order
+
+1. The strategy's `quantity` sets the requested share count, calculated at the signal close.
+2. The risk rules cap it: no more than `max_position_pct` of equity at the worst-case fill
+   price, no more than `max_adv_pct` of average daily traded value, and no more than the
+   available cash (including cash from exits that day).
+3. Slots: when more stocks signal than there are free slots under `max_positions`, they are
+   filled by `priority`, then `score`. A symbol is never held by two strategies at once.
 
 ## Architecture
 
 ```
 swingbot/
-  panel.py            Panel: universe as aligned (dates x symbols) numpy arrays + data-quality report
-  indicators.py       vectorised, causal indicators (SMA/EMA/ATR/RSI/ROC/Donchian/Supertrend)
-  costs.py            CostModel (Zerodha / Groww / free) + jitted order_cost
-  strategies/         a strategy only produces Signals: entry, exit, stop distance, trail, score, holds
-    pullback.py       buy RSI(3) dips in long-term up-trends
-    breakout.py       20-day high breakout on 1.5x volume, ATR trailing stop
-    supertrend.py     daily Supertrend flips (port of legacy/kc_supertrend.py)
+  config.py           strategy file -> RunConfig (RiskConfig, Quantity, StrategySpec, DataConfig, LiveConfig)
+  runner.py           Runner.backtest / .paper / .live / .status  <- the single entry point
   engine/
-    kernel.py         the numba simulation loop (exact per-bar order of events is documented there)
-    backtest.py       EngineConfig + Backtest (signals once, simulate any window)
-    metrics.py        CAGR, Sharpe, Sortino, Calmar, max DD and duration, win rate, PF, expectancy (R), SQN
-    result.py         Result: equity, trades, by_symbol, monthly_returns, summary, save, plot
-    optimize.py       parallel grid sweep + rolling walk-forward
-  data/               providers (kite, groww, yahoo, synthetic), Parquet store, universes
-  cli.py              python -m swingbot ...
-tests/                engine correctness (fills, gaps, stops, costs, look-ahead, numba == pure Python)
-legacy/               the previous scripts, kept for reference
+    kernel.py         jitted core: on_open -> on_intraday -> on_close (risk rules + sizing), resumable state
+    backtest.py       Engine (signals of all strategies stacked) + Backtest
+    book.py           persistent portfolio state (JSON) for paper/live, trade & equity ledgers
+    result.py         stats, by_strategy, by_symbol, monthly returns, plots
+    metrics.py        CAGR, Sharpe, Sortino, Calmar, max DD, win rate, PF, expectancy (R), SQN
+    optimize.py       parallel sweep + walk-forward for one strategy of the file
+  strategies/
+    expr.py           safe expression language
+    rules.py          RuleStrategy (strategies written in the file)
+    pullback.py, breakout.py, supertrend.py   built-ins
+  brokers/
+    base.py           plan_orders: book -> BUY / SELL / STOP orders (same for paper and live)
+    kite.py           Zerodha: AMO entries/exits, GTT stops, fill sync, holdings reconciliation
+  data/               yahoo, kite, groww, synthetic providers + incremental Parquet cache
+  panel.py            the universe as aligned (dates x symbols) arrays + data-quality report
+  costs.py            STT, exchange, SEBI, stamp, GST, DP (Zerodha / Groww presets)
+runs/<name>/{backtest,paper,live}/   results, book.json, trades.csv, equity.csv
 ```
 
-**Why this design is fast:** strategies compute signals for the whole universe in a
-few vectorised pandas calls. The only loop that has to be a loop, the portfolio
-simulation, is one numba-compiled pass over contiguous arrays with no Python
-objects per trade. Signals are computed once and reused for every window, so
-walk-forward runs never recompute indicators. Without numba, the same code runs
-as pure Python (`SWINGBOT_NO_JIT=1`), and a test checks that both give identical
-results.
+**Why paper and live behave like the backtest.** All portfolio state is held in two arrays,
+`pos` and `acct`. The kernel advances that state one day at a time:
 
-**Adding a strategy:** subclass `Strategy`, add dataclass fields as parameters,
-implement `generate(panel) -> Signals`, and register it in `strategies/__init__.py`.
-Sweeps, walk-forward and the CLI then work with it automatically.
+- **Backtest** starts from empty state and advances over the whole history.
+- **Paper** loads yesterday's state from `book.json`, advances over the new bars, and saves it again.
+- **Live** replaces the simulated fills with the broker's real fills, then runs the same
+  `on_close` decision.
+
+The order rules match the simulation:
+
+- Entries are limit orders at `close × (1 + max_entry_gap)`. A larger gap-up doesn't fill, the
+  same as in the backtest.
+- Stops are GTT orders at the engine's stop price, which trails upward as the position gains.
+
+## Things to know
+
+1. **Survivorship bias.** `nifty50.csv` is a 2020 snapshot of the index. For serious work,
+   use historical (point-in-time) index membership.
+2. **Corporate actions.** Use split- and bonus-adjusted data. The quality report flags gaps
+   larger than 35%.
+3. **Costs.** Delivery STT is 0.1% on each side. A round trip including slippage costs about
+   0.3–0.5%, which is a high bar for short swing trades.
+4. **Out-of-sample results.** Judge strategies with `walkforward`, not by the best result from `sweep`.
+5. **Live differences.** Live fills, partial fills, and GTT stops that fill at their limit price
+   will differ slightly from the simulation. Book and broker holdings are reconciled every run,
+   and mismatches are logged as warnings.
+6. **Capital.** `capital` is the amount allocated to the bot, not your whole account balance.
 
 ## Ideas taken from `fullstack-trading-app`
 
-* A universe file of Nifty 50 constituents (`data/universes/nifty50.csv`).
-* A per-stock results table (`Result.by_symbol()`, which replaces `result_df.csv`) and SQN,
-  drawdown and Sharpe analytics. These are now computed from our own trade list, not
-  backtrader analyzers.
-* A local candle store: Parquet files instead of Postgres. There is no database server to run
-  or maintain.
-* Commission/sizer settings became `EngineConfig` plus a real Indian `CostModel`
-  instead of a flat 0.01%.
-
-Left out: backtrader (too slow for portfolio sweeps), hard-coded Windows paths,
-SQL built with f-strings, and the intraday opening-range-breakout logic, which
-does not fit a 1-day to 3-week holding engine.
-
-## Things to know before trusting a backtest
-
-1. **Survivorship bias.** `nifty50.csv` is a 2020 snapshot. It leaves out stocks that
-   were dropped from the index, and it includes HDFC, which later merged into HDFC
-   Bank. For serious work, use point-in-time index membership.
-2. **Corporate actions.** The engine needs split- and bonus-adjusted prices.
-   `Panel.quality_report()` (run by the CLI automatically) flags overnight gaps
-   above 35%, which usually means an unadjusted split.
-3. **Costs matter for swing trading in India.** Delivery STT is 0.1% on each side,
-   so with slippage a round trip costs about 0.3–0.5%. On the sample run, costs
-   were around 60% of starting capital over 2,000 trades. Strategies need a real
-   edge per trade, not just a high win rate.
-4. **Out-of-sample results are what count.** The best in-sample sweep (Sharpe 0.45) fell to
-   about 0.06 Sharpe out of sample in walk-forward. Use `walkforward`, not
-   `sweep`, to judge a strategy.
-
-## Roadmap
-
-* Live execution adapter: place CNC orders plus GTT stop-loss on Kite or Groww from `scan` output
-* Point-in-time Nifty 200/500 membership
-* Monte Carlo trade reshuffling and bootstrap confidence intervals
-* Sector exposure caps and correlation-aware ranking
+The Nifty 50 universe file, per-stock result tables (`by_symbol`) and SQN, drawdown and Sharpe
+analytics, and a local candle store (Parquet instead of Postgres). Its flat 0.01% commission
+was replaced with the full set of Indian delivery charges.

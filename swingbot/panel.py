@@ -80,6 +80,14 @@ class Panel:
     def index_of(self, date, side: str = "left") -> int:
         return int(self.dates.searchsorted(pd.Timestamp(date), side=side))
 
+    def head(self, n: int) -> Panel:
+        """The first n sessions -- exactly what a live run on day n-1 would have seen."""
+        return Panel(
+            self.dates[:n], list(self.symbols),
+            *(getattr(self, f)[:n] for f in FIELDS),
+            benchmark=None if self.benchmark is None else self.benchmark[:n], benchmark_name=self.benchmark_name,
+        )
+
     def select(self, symbols: list[str]) -> Panel:
         cols = [self.symbols.index(s) for s in symbols]
         return Panel(

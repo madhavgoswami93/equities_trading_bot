@@ -8,6 +8,7 @@ api_key*.txt
 # data & outputs
 data/cache/
 results/
+runs/
 *.parquet
 
 # python

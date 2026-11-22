@@ -47,7 +47,7 @@ class Strategy:
         raise NotImplementedError
 
     # -------------------------------------------------------------- helpers
-    def params(self) -> dict:
+    def settings(self) -> dict:
         return {f.name: getattr(self, f.name) for f in fields(self)}
 
     def with_params(self, **kw) -> Strategy:
