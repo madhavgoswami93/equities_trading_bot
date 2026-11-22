@@ -1,0 +1,28 @@
+# secrets -- never commit
+.env
+.secrets/
+sensitive/
+*access_token*
+api_key*.txt
+
+# data & outputs
+data/cache/
+results/
+*.parquet
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+build/
+dist/
+
+# editors / OS
+.DS_Store
+.ipynb_checkpoints/
+.vscode/
+.idea/
