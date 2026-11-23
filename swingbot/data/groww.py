@@ -46,7 +46,7 @@ def _client():
 
 class GrowwProvider(DataProvider):
     name = "groww"
-    benchmark_symbol = None  # use --benchmark-provider yahoo for the Nifty index
+    benchmark_symbol = None  # the Nifty index comes from the history provider (Yahoo)
 
     def __init__(self, exchange: str = "NSE"):
         self.g = _client()

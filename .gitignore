@@ -7,6 +7,8 @@ api_key*.txt
 
 # data & outputs
 data/cache/
+*.duckdb
+*.duckdb.wal
 results/
 runs/
 *.parquet

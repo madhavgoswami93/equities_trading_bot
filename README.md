@@ -24,27 +24,57 @@ strategies.toml ──► backtest ──► paper (live data, simulated fills) 
 * **Speed:** 500 stocks × 20 years × 3 strategies simulates in about 30 ms after the first compile.
   Parameter sweeps run in parallel.
 
-## Cheapest setup: ₹0 per month
+## How many APIs do you need? One broker, plus free history
 
-Daily-bar swing trading only needs end-of-day candles, which are free:
+You need **one broker API** for orders. Long price history is filled into a local database once,
+from a free source, and the broker keeps it current from then on.
 
-| Need | Free option | Paid alternative |
+| Setup | Daily data + orders | Long history (one-off) | Cost per month |
+|---|---|---|---|
+| **Groww only** | Groww Trade API (one plan covers data **and** orders) | Yahoo (free) | ~₹499 + GST |
+| **Kite, cheapest** | Yahoo EOD data + Kite Personal (orders, GTT, holdings) | Yahoo (free) | ₹0 |
+| **Kite with its own data** | Kite Connect (data + orders) | Kite or Yahoo | ~₹500 |
+
+Groww's candles only go back to about 2020, which is too short for a robust swing backtest.
+Keep `history_provider = "yahoo"` for the backfill and `provider = "groww"` for daily updates.
+SEBI's retail algo framework (in force from April 2026) requires API orders to come from a static IP
+registered with your broker, whichever broker you use. Broker pricing changes often, so check
+each broker's own page before you subscribe.
+
+| Broker difference | Kite | Groww |
 |---|---|---|
-| Research and backtests | **Yahoo Finance** (`provider = "yahoo"`): 15+ years, split-adjusted | Kite Connect (about ₹500/month) |
-| Paper trading | **Yahoo** EOD after 15:45 IST | — |
-| Live orders | **Zerodha Kite "Personal" API**: orders, GTT and portfolio endpoints are free | — |
-| Free historical data APIs | **Angel One SmartAPI** and **Fyers API** are free for account holders | Groww (about ₹499/month, data only from 2020), Dhan data (about ₹499/month) |
+| After-market orders | Yes: tomorrow's orders go out at 15:45 | No: queued in the book, sent at 09:16 |
+| Stop-loss | GTT single trigger | GTT smart order (CNC supported) |
+| Duplicate protection | Order tag checked against today's orders | Deterministic `order_reference_id` |
 
-**Recommended:** Yahoo for data plus Kite Personal for orders. Zerodha delivery brokerage is
-₹0, and the API costs ₹0. Kite has required a static IP for API orders since April 2026. Broker
-pricing changes often, so check each broker's own page before you subscribe.
+## Local market database
+
+Every daily bar lives in one DuckDB file, `data/market.duckdb` (about 13 MB for Nifty 50 since 2008).
+There is no server to run, and it's easy to back up.
+
+```bash
+python -m swingbot fetch strategies.toml                 # first run backfills history, later runs append
+python -m swingbot fetch strategies.toml --full          # re-download everything
+python -m swingbot db strategies.toml status             # coverage per symbol, stale symbols
+python -m swingbot db strategies.toml log                # every download, with its status
+python -m swingbot db strategies.toml sql "select symbol, max(close) from bars_daily group by 1"
+python -m swingbot db strategies.toml import-parquet     # one-off migration from the old data/cache/
+```
+
+* **Backfill and updates come from different providers.** A symbol with no data is backfilled
+  from `history_provider`. Every later fetch pulls only the latest sessions from `provider`.
+* **Splits and bonuses are caught.** Each update re-downloads the last week and compares it with
+  what's stored. A mismatch of more than 1% means a corporate action restated history, so that
+  symbol is re-downloaded in full.
+* **No partial candles.** Downloads stop at the last finished session (15:35 IST), so a fetch
+  during market hours never stores today's half-formed bar.
 
 ## Quick start
 
 ```bash
-pip install -e ".[yahoo,plot,dev]"            # Python 3.11+; add [kite] for live trading
+pip install -e ".[yahoo,plot,dev]"            # Python 3.11+; add [kite] or [groww] for live trading
 python -m swingbot init strategies.toml       # commented template
-python -m swingbot fetch strategies.toml      # download / refresh daily candles (cached as Parquet)
+python -m swingbot fetch strategies.toml      # backfill / update the local market database
 python -m swingbot backtest strategies.toml   # all enabled strategies as one portfolio
 ```
 
@@ -61,16 +91,35 @@ python -m swingbot paper strategies.toml                 # updates data, fills, 
 python -m swingbot paper strategies.toml --start 2026-06-01 --reset   # replay paper from a date
 python -m swingbot status strategies.toml
 
-# 3. live (Zerodha Kite): dry run until you set `dry_run = false` AND pass --send
-python -m swingbot kite-login                            # each morning: today's access token
-python -m swingbot live strategies.toml --phase open --send    # ~09:20: sync fills, place GTT stops
-python -m swingbot live strategies.toml --send                 # ~15:45: sync, decide, send AMOs for tomorrow
+# 3. live: dry run until you set `dry_run = false` AND pass --send
+python -m swingbot kite-login                            # Kite only: each morning, today's access token
+python -m swingbot live strategies.toml --phase open --send    # ~09:16-09:20: send queued orders (Groww), sync fills, place stops
+python -m swingbot live strategies.toml --send                 # ~15:45: sync, decide on the close, send what the broker accepts
+python -m swingbot halt strategies.toml                  # kill switch: no new entries (exits and stops still run)
+python -m swingbot halt strategies.toml --off
 ```
 
-Example cron entries (server clock in IST):
+### Live safety
+
+| Guard | What it does |
+|---|---|
+| Stale-data check | Refuses to decide unless the latest bar is today's finished session (after 15:35 IST) |
+| Once per day | A second close-phase run on the same day is refused (`--force` overrides) |
+| No duplicate orders | Already-sent orders are recognised after a crash (Kite tag, Groww reference id) |
+| Halt switch | `swingbot halt` blocks new entries; exits and stop-losses keep running |
+| Reconciliation | Every run compares the book with broker holdings and logs any mismatch |
+| Dry run by default | Orders go out only with `dry_run = false` **and** `--send` |
+| Audit trail | `runs/<name>/live/swingbot.log`, a daily `history/book-<date>.json` snapshot, trade and equity ledgers |
+| Alerts | `[alerts] telegram = true` sends each report and any failure to your phone |
+| Dashboard | Bound to `127.0.0.1`, so it isn't reachable from your Wi-Fi network |
+
+Example cron entries (server clock in IST). Run live trading on a machine that stays on and has a
+static IP, such as a small cloud VM. A laptop that sleeps will miss runs.
 
 ```
-15 16 * * 1-5  cd ~/equities_trading_bot && python -m swingbot paper strategies.toml >> runs/paper.log 2>&1
+16 9  * * 1-5  cd ~/equities_trading_bot && .venv/bin/python -m swingbot live  strategies.toml --phase open --send
+50 15 * * 1-5  cd ~/equities_trading_bot && .venv/bin/python -m swingbot live  strategies.toml --send
+15 16 * * 1-5  cd ~/equities_trading_bot && .venv/bin/python -m swingbot paper strategies.toml
 ```
 
 ## Dashboard
@@ -162,8 +211,9 @@ swingbot/
   brokers/
     base.py           plan_orders: book -> BUY / SELL / STOP orders (same for paper and live)
     kite.py           Zerodha: AMO entries/exits, GTT stops, fill sync, holdings reconciliation
+    groww.py          Groww: queued entries sent at the open, GTT smart-order stops, reference-id idempotency
   dashboard/          Streamlit app (app.py) + Plotly charts (charts.py)
-  data/               yahoo, kite, groww, synthetic providers + incremental Parquet cache
+  data/               yahoo, kite, groww, synthetic providers + DuckDB market database (store.py)
   panel.py            the universe as aligned (dates x symbols) arrays + data-quality report
   costs.py            STT, exchange, SEBI, stamp, GST, DP (Zerodha / Groww presets)
 runs/<name>/{backtest,paper,live}/   results, book.json, trades.csv, equity.csv
@@ -200,5 +250,5 @@ The order rules match the simulation:
 ## Ideas taken from `fullstack-trading-app`
 
 The Nifty 50 universe file, per-stock result tables (`by_symbol`) and SQN, drawdown and Sharpe
-analytics, and a local candle store (Parquet instead of Postgres). Its flat 0.01% commission
+analytics, and a local candle store (an embedded DuckDB file instead of Postgres). Its flat 0.01% commission
 was replaced with the full set of Indian delivery charges.

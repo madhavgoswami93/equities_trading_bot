@@ -9,10 +9,11 @@
 name = "core_swing"            # state goes to runs/<name>/{backtest,paper,live}/
 
 [data]
-provider = "yahoo"             # yahoo (free) | kite (Connect plan) | groww (paid)
+provider = "yahoo"             # daily updates: yahoo (free) | groww | kite -- usually your broker
+history_provider = "yahoo"     # one-off long backfill (Yahoo: free, 15+ years, split-adjusted)
 universe = "nifty50"           # data/universes/<name>.csv, a CSV path, or "RELIANCE,TCS,INFY"
 start = "2008-01-01"           # history to download and backtest from
-# benchmark_provider = "yahoo" # where the Nifty index comes from (regime filter)
+db = "data/market.duckdb"      # local market database (one file; back it up)
 
 # ---------------------------------------------------------------------------
 #  Risk rules -- enforced by the engine for ALL strategies together.
@@ -31,9 +32,12 @@ halt_cooldown = 20             # ...for 20 sessions, then reset the peak and res
 costs = "zerodha"              # zerodha | groww | free
 
 [live]
-broker = "kite"                # orders via Zerodha Kite (free "Personal" API plan)
+broker = "kite"                # kite (orders free on the Personal plan) | groww (one paid plan: data + orders)
 dry_run = true                 # set to false AND pass --send to place real orders
 stop_limit_buffer = 0.01       # GTT stop sells with a limit 1% under the trigger
+
+[alerts]
+telegram = false               # send each paper/live report and any failure to Telegram (keys in .env)
 
 # ---------------------------------------------------------------------------
 #  Strategies. Write signals as expressions (type = "rules") or use a built-in

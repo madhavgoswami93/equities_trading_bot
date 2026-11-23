@@ -53,9 +53,9 @@ MODE = theme_mode()
 
 
 def data_stamp(cfg) -> float:
-    """Changes whenever the cached candles change -> invalidates the panel cache."""
-    d = Path(cfg.data.cache_dir) / cfg.data.provider
-    return max((f.stat().st_mtime for f in d.glob("*.parquet")), default=0.0) if d.exists() else 0.0
+    """Changes whenever the market database changes -> invalidates the panel cache."""
+    p = Path(cfg.data.db)
+    return p.stat().st_mtime if p.exists() else 0.0
 
 
 @st.cache_resource(show_spinner="Loading market data...")
@@ -409,6 +409,9 @@ with tab_file:
 ARCH_PAGE = Path(__file__).resolve().parents[2] / "docs" / "architecture.html"
 with tab_arch:
     if ARCH_PAGE.exists():
-        components.html(ARCH_PAGE.read_text(), height=2900, scrolling=True)
+        if hasattr(st, "iframe"):
+            st.iframe(ARCH_PAGE, height=2900)
+        else:  # Streamlit before st.iframe
+            components.html(ARCH_PAGE.read_text(), height=2900, scrolling=True)
     else:
         st.info(f"Architecture page not found at {ARCH_PAGE}.")

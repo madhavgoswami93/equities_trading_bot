@@ -56,8 +56,37 @@ def cmd_init(a):
 
 def cmd_fetch(a):
     r = _runner(a)
-    r.update_data()
-    print(f"data cache updated in {r.cfg.data.cache_dir}/{r.cfg.data.provider}/")
+    failed = r.update_data(full=a.full)
+    cov = r.db().coverage()
+    print(f"{len(cov)} symbols in {r.cfg.data.db}, latest session {cov['last'].max() if len(cov) else '-'}")
+    if failed:
+        print("failed:", ", ".join(failed))
+
+
+def cmd_db(a):
+    r = _runner(a)
+    db = r.db()
+    if a.action == "status":
+        cov = db.coverage()
+        if cov.empty:
+            print(f"{db.path} is empty -- run: python -m swingbot fetch {a.file}")
+            return
+        print(cov.to_string(index=False))
+        stale = cov[cov["last"] < cov["last"].max()]
+        print(f"\n{len(cov)} symbols, {int(cov.bars.sum()):,} bars, {db.path} "
+              f"({db.path.stat().st_size / 1e6:.1f} MB)")
+        if len(stale):
+            print(f"behind the latest session: {', '.join(stale.symbol)}")
+    elif a.action == "log":
+        print(db.sql("select * from fetch_log order by logged_at desc limit 50").to_string(index=False))
+    elif a.action == "sql":
+        if not a.query:
+            sys.exit('give a query: swingbot db FILE sql "select ..."')
+        print(db.sql(a.query).to_string(index=False))
+    elif a.action == "import-parquet":
+        from .data import import_parquet
+
+        print(f"imported {import_parquet(db, a.query or 'data/cache'):,} bars into {db.path}")
 
 
 def cmd_backtest(a):
@@ -81,14 +110,58 @@ def cmd_backtest(a):
     print(f"\nsaved equity.csv, trades.csv, by_strategy.csv, by_symbol.csv, stats.json -> {out}")
 
 
+def _log_to_file(r, mode: str) -> None:
+    """Append INFO-level logs to runs/<name>/<mode>/swingbot.log; the console keeps its level."""
+    d = r.cfg.state_dir(mode)
+    d.mkdir(parents=True, exist_ok=True)
+    root = logging.getLogger()
+    for hd in root.handlers:
+        hd.setLevel(root.level)
+    fh = logging.FileHandler(d / "swingbot.log")
+    fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    fh.setLevel(logging.INFO)
+    root.addHandler(fh)
+    root.setLevel(min(root.level, logging.INFO))
+
+
+def _run_and_alert(r, mode: str, fn):
+    from .data import load_env
+    from .notify import telegram
+
+    load_env()
+    _log_to_file(r, mode)
+    try:
+        rep = fn()
+    except Exception as e:
+        logging.getLogger("swingbot").exception("%s run failed", mode)
+        if r.cfg.alerts.telegram:
+            telegram(f"swingbot {r.cfg.name} [{mode}] FAILED: {type(e).__name__}: {e}")
+        raise
+    print(rep)
+    if r.cfg.alerts.telegram:
+        telegram(f"swingbot {r.cfg.name}\n{rep}")
+
+
 def cmd_paper(a):
     r = _runner(a)
-    print(r.paper(update=not a.no_update, start=a.start, reset=a.reset))
+    _run_and_alert(r, "paper", lambda: r.paper(update=not a.no_update, start=a.start, reset=a.reset))
 
 
 def cmd_live(a):
     r = _runner(a)
-    print(r.live(phase=a.phase, update=not a.no_update, send=a.send, force=a.force))
+    _run_and_alert(r, "live", lambda: r.live(phase=a.phase, update=not a.no_update, send=a.send, force=a.force))
+
+
+def cmd_halt(a):
+    r = _runner(a)
+    f = r.halt_file()
+    if a.off:
+        f.unlink(missing_ok=True)
+        print(f"resumed: new entries allowed ({f} removed)")
+    else:
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("new entries blocked; remove with: swingbot halt FILE --off\n")
+        print("HALTED: live runs will send no new entries (exits and stops still run). Undo: --off")
 
 
 def cmd_status(a):
@@ -123,9 +196,12 @@ def cmd_dashboard(a):
     import subprocess
 
     app = Path(__file__).resolve().parent / "dashboard" / "app.py"
+    # bound to this machine only: the dashboard can run paper steps and edit the strategy file,
+    # so it must not be reachable from the Wi-Fi network unless asked for with --host 0.0.0.0
     cmd = [sys.executable, "-m", "streamlit", "run", str(app), "--server.port", str(a.port),
-           "--server.headless", "true", "--", "--file", a.file]
-    print(f"dashboard on http://localhost:{a.port}  (Ctrl+C to stop)")
+           "--server.address", a.host, "--server.headless", "true", "--browser.gatherUsageStats", "false",
+           "--", "--file", a.file]
+    print(f"dashboard on http://{'localhost' if a.host == '127.0.0.1' else a.host}:{a.port}  (Ctrl+C to stop)")
     sys.exit(subprocess.call(cmd))
 
 
@@ -186,7 +262,12 @@ def build_parser() -> argparse.ArgumentParser:
         return p
 
     cmd("init", cmd_init, "write a commented example strategy file")
-    cmd("fetch", cmd_fetch, "download / update daily candles for the file's universe")
+    p = cmd("fetch", cmd_fetch, "download new daily candles into the local database")
+    p.add_argument("--full", action="store_true", help="re-download full history for every symbol")
+
+    p = cmd("db", cmd_db, "inspect the local market database")
+    p.add_argument("action", choices=["status", "log", "sql", "import-parquet"])
+    p.add_argument("query", nargs="?", help="SQL for `sql`; old cache folder for `import-parquet`")
 
     p = cmd("backtest", cmd_backtest, "backtest all enabled strategies as one portfolio")
     p.add_argument("--start")
@@ -203,8 +284,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = cmd("live", cmd_live, "live trading via the broker in [live] (dry run unless --send)")
     p.add_argument("--phase", choices=["open", "close"], default="close")
     p.add_argument("--send", action="store_true", help="really send orders (also needs dry_run = false)")
-    p.add_argument("--force", action="store_true", help="re-run a day that was already processed")
+    p.add_argument("--force", action="store_true", help="skip the safety checks (day already processed, stale data)")
     p.add_argument("--no-update", action="store_true")
+
+    p = cmd("halt", cmd_halt, "kill switch: block new live entries (exits and stops still run)")
+    p.add_argument("--off", action="store_true", help="lift the halt")
 
     p = cmd("status", cmd_status, "show the paper or live book")
     p.add_argument("--mode", choices=["paper", "live"], default="paper")
@@ -226,6 +310,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = cmd("dashboard", cmd_dashboard, "open the web dashboard (needs the [dashboard] extra)")
     p.add_argument("--port", type=int, default=8501)
+    p.add_argument("--host", default="127.0.0.1", help="0.0.0.0 exposes it to your network (not recommended)")
 
     p = sub.add_parser("docs", help="serve the architecture page locally")
     p.add_argument("--port", type=int, default=8000)

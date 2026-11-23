@@ -29,6 +29,7 @@ DEAD = {"CANCELLED", "REJECTED"}
 
 class KiteBroker(Broker):
     name = "kite"
+    supports_amo = True
 
     def __init__(self, kite=None, exchange: str = "NSE", tag: str = "swingbot", stop_limit_buffer: float = 0.01):
         if kite is None:
@@ -142,18 +143,31 @@ class KiteBroker(Broker):
                             have.get(p["symbol"], 0))
 
     # ---------------------------------------------------------- book -> orders
+    def _already_sent(self) -> set[tuple[str, str]]:
+        """(symbol, side) of today's live orders carrying our tag -- a re-run after a crash
+        between sending and saving must not send them twice."""
+        try:
+            return {(o["tradingsymbol"], o["transaction_type"]) for o in self.kite.orders()
+                    if o.get("tag") == self.tag and o.get("status") not in DEAD}
+        except Exception as e:  # noqa: BLE001
+            log.warning("could not list today's orders: %s", e)
+            return set()
+
     def execute(self, book: Book, orders: list[Order], last_prices: dict[str, float]) -> None:
         k = self.kite
+        sent = self._already_sent()
         for o in orders:
             m = book.meta.setdefault(o.symbol, {})
             if o.action == "BUY":
+                if m.get("entry_order_id") or (o.symbol, "BUY") in sent:
+                    continue
                 m["entry_order_id"] = k.place_order(
                     variety=k.VARIETY_AMO, exchange=self.exchange, tradingsymbol=o.symbol,
                     transaction_type=k.TRANSACTION_TYPE_BUY, quantity=o.qty, product=k.PRODUCT_CNC,
                     order_type=k.ORDER_TYPE_LIMIT if o.price else k.ORDER_TYPE_MARKET, price=o.price,
                     validity=k.VALIDITY_DAY, tag=self.tag)
             elif o.action == "SELL":
-                if m.get("exit_order_id"):
+                if m.get("exit_order_id") or (o.symbol, "SELL") in sent:
                     continue  # already sent
                 if m.get("gtt_id"):
                     self._delete_gtt(m.pop("gtt_id"))
@@ -188,10 +202,3 @@ class KiteBroker(Broker):
             self.kite.delete_gtt(gtt_id)
         except Exception as e:  # noqa: BLE001
             log.warning("delete GTT %s failed: %s", gtt_id, e)
-
-
-def get_broker(name: str, live_cfg) -> Broker:
-    if name == "kite":
-        return KiteBroker(exchange="NSE", tag=live_cfg.tag, stop_limit_buffer=live_cfg.stop_limit_buffer)
-    raise NotImplementedError(
-        f"live broker {name!r} is not implemented; use 'kite' (orders are free on the Kite Personal plan)")

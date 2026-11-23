@@ -129,11 +129,11 @@ def specs_param_array(specs: list[StrategySpec], signals) -> np.ndarray:
 # --------------------------------------------------------------- data / live
 @dataclass
 class DataConfig:
-    provider: str = "yahoo"  # kite | groww | yahoo
+    provider: str = "yahoo"  # daily updates: yahoo | groww | kite (usually your broker)
+    history_provider: str | None = None  # one-off long backfill; default = provider (yahoo is free, 15+ yrs)
     universe: str = "nifty50"
-    benchmark_provider: str | None = None
     start: str = "2008-01-01"  # history to download / backtest from
-    cache_dir: str = "data/cache"
+    db: str = "data/market.duckdb"  # local market database
 
 
 @dataclass
@@ -145,12 +145,18 @@ class LiveConfig:
 
 
 @dataclass
+class AlertsConfig:
+    telegram: bool = False  # send paper/live reports and failures (TELEGRAM_BOT_TOKEN / _CHAT_ID in .env)
+
+
+@dataclass
 class RunConfig:
     name: str
     data: DataConfig
     risk: RiskConfig
     live: LiveConfig
     strategies: list[StrategySpec]
+    alerts: AlertsConfig = field(default_factory=AlertsConfig)
     runs_dir: str = "runs"
     source: Path | None = None
 
@@ -212,6 +218,7 @@ def load_config(path: str | Path) -> RunConfig:
         risk=RiskConfig(**raw.get("risk", {})),
         live=LiveConfig(**raw.get("live", {})),
         strategies=strategies,
+        alerts=AlertsConfig(**raw.get("alerts", {})),
         runs_dir=raw.get("runs_dir", "runs"),
         source=path,
     )

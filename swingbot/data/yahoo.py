@@ -7,6 +7,7 @@ data before trading real money.
 
 from __future__ import annotations
 
+import logging
 from datetime import date, timedelta
 
 import pandas as pd
@@ -26,6 +27,8 @@ class YahooProvider(DataProvider):
 
     def daily(self, symbol: str, start: date, end: date) -> pd.DataFrame:
         import yfinance as yf
+
+        logging.getLogger("yfinance").setLevel(logging.CRITICAL)  # we report failures ourselves, once
 
         df = yf.Ticker(self.ticker(symbol)).history(
             start=str(start), end=str(pd.Timestamp(end).date() + timedelta(days=1)), auto_adjust=True, actions=False

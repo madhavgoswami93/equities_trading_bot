@@ -58,6 +58,7 @@ def plan_orders(book: Book) -> list[Order]:
 
 class Broker(ABC):
     name = "base"
+    supports_amo = True  # can queue orders after the close for the next open (Kite: yes, Groww: no)
 
     @abstractmethod
     def sync(self, book: Book, engine, today, final: bool = True) -> list[dict]:
@@ -68,3 +69,15 @@ class Broker(ABC):
     @abstractmethod
     def execute(self, book: Book, orders: list[Order], last_prices: dict[str, float]) -> None:
         """Send the orders and remember broker ids in book.meta."""
+
+
+def get_broker(name: str, live_cfg) -> Broker:
+    if name == "kite":
+        from .kite import KiteBroker
+
+        return KiteBroker(exchange="NSE", tag=live_cfg.tag, stop_limit_buffer=live_cfg.stop_limit_buffer)
+    if name == "groww":
+        from .groww import GrowwBroker
+
+        return GrowwBroker(stop_limit_buffer=live_cfg.stop_limit_buffer)
+    raise NotImplementedError(f"live broker {name!r} is not supported; use 'kite' or 'groww'")

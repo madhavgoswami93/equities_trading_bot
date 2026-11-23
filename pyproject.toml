@@ -13,6 +13,7 @@ dependencies = [
     "pandas>=2.1",
     "pyarrow>=14",
     "numba>=0.59",
+    "duckdb>=1.1",
 ]
 
 [project.optional-dependencies]

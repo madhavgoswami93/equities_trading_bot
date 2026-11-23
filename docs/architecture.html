@@ -123,7 +123,7 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
   <header>
     <div class="eyebrow">equities_trading_bot · swingbot 0.2 · NSE cash equity, CNC delivery</div>
     <h1>Swingbot Architecture</h1>
-    <p class="lede">One strategy file drives backtesting, paper trading and live trading through the same engine. Market data comes in from Yahoo, Groww or Kite. Orders go out only to Zerodha Kite, and everything else stays on your machine.</p>
+    <p class="lede">One strategy file drives backtesting, paper trading and live trading through the same engine. You need one broker API, Kite or Groww, for orders. Long price history is backfilled once from free Yahoo data into a local DuckDB database, and everything else stays on your machine.</p>
   </header>
 
   <section aria-labelledby="h-diagram">
@@ -144,8 +144,8 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
         <text class="t-sub" x="52" y="107">free · yfinance</text>
         <rect class="box-paid" x="256" y="46" width="200" height="70" rx="8"/>
         <text class="t-title" x="272" y="72">Groww Trade API</text>
-        <text class="t-sub" x="272" y="92">daily candles (from 2020)</text>
-        <text class="t-sub" x="272" y="107">optional · ₹499/mo</text>
+        <text class="t-sub" x="272" y="92">candles + orders, one plan</text>
+        <text class="t-sub" x="272" y="107">₹499/mo · data from 2020</text>
         <rect class="box-key" x="560" y="46" width="364" height="70" rx="8"/>
         <text class="t-title" x="576" y="72">Zerodha Kite Connect</text>
         <text class="t-sub" x="576" y="92">orders · GTT stops · holdings: free Personal plan</text>
@@ -172,12 +172,12 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
         <text class="t-sub" x="638" y="252">resumed daily</text>
         <rect class="box-key" x="772" y="210" width="140" height="56" rx="7"/>
         <text class="t-title" x="788" y="234">live</text>
-        <text class="t-sub" x="788" y="252">brokers/kite.py</text>
+        <text class="t-sub" x="788" y="252">kite · groww</text>
 
         <rect class="box" x="36" y="320" width="180" height="76" rx="8"/>
-        <text class="t-title" x="52" y="346">Price cache</text>
-        <text class="t-sub" x="52" y="366">data/cache/</text>
-        <text class="t-sub" x="52" y="381">*.parquet, incremental</text>
+        <text class="t-title" x="52" y="346">Market database</text>
+        <text class="t-sub" x="52" y="366">data/market.duckdb</text>
+        <text class="t-sub" x="52" y="381">backfill + daily updates</text>
 
         <rect class="box-key" x="256" y="320" width="668" height="76" rx="8"/>
         <text class="t-title" x="272" y="346">Engine · numba kernel</text>
@@ -199,21 +199,21 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
         <text class="t-sub" x="634" y="492">localhost:8501 · 5 tabs</text>
         <text class="t-sub" x="634" y="507">read-only for live orders</text>
 
-        <text class="t-sub" x="36" y="556">Nothing calls in from outside: every connection is outbound request / response. No database, no cloud service.</text>
+        <text class="t-sub" x="36" y="556">Nothing calls in from outside: every connection is outbound request / response. No database server, no cloud service: DuckDB is one local file.</text>
 
         <!-- github -->
         <rect class="z-ext" x="20" y="600" width="920" height="46" rx="10"/>
         <text class="t-title" x="36" y="628">GitHub</text>
-        <text class="t-sub" x="100" y="628">repository + Actions CI: pytest (43 tests) on every push and pull request</text>
+        <text class="t-sub" x="100" y="628">repository + Actions CI: pytest (51 tests) on every push and pull request</text>
 
         <!-- edges: data in -->
         <path class="edge" d="M96 116 V150 H28 V358 H34" marker-end="url(#a)"/>
         <path class="edge" d="M356 116 V150 H96"/>
-        <text class="t-edge" x="112" y="164">daily candles → price cache</text>
+        <text class="t-edge" x="112" y="164">history backfill (Yahoo) + daily updates (broker) → market database</text>
         <!-- live <-> kite -->
         <path class="edge-key" d="M842 118 V208" marker-start="url(#ak)" marker-end="url(#ak)"/>
-        <text class="t-edge" x="666" y="150">AMO orders · GTT stops</text>
-        <text class="t-edge" x="666" y="164">fill + holdings sync</text>
+        <text class="t-edge" x="600" y="150">orders · GTT stops · fill + holdings sync</text>
+        <text class="t-edge" x="600" y="164">to Kite or Groww (one broker)</text>
         <!-- config -> runner -> modes -->
         <path class="edge" d="M216 238 H254" marker-end="url(#a)"/>
         <path class="edge" d="M426 238 H458" marker-end="url(#a)"/>
@@ -241,7 +241,7 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
 
   <section aria-labelledby="h-third">
     <h2 id="h-third">Third parties connected</h2>
-    <p>Only Kite can move money. Data providers are interchangeable through <code>[data] provider</code> in the strategy file.</p>
+    <p>Only your one broker (Kite or Groww, set in <code>[live] broker</code>) can move money. Data providers are interchangeable through <code>[data] provider</code> and <code>history_provider</code>.</p>
     <div class="table-wrap">
       <table>
         <thead>
@@ -262,14 +262,22 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
             <td class="mono">kiteconnect</td>
             <td class="mono">api.kite.trade<br>kite.zerodha.com (login)</td>
             <td><span class="chip free">Orders free</span><br><span class="chip paid">Data ₹500/mo</span></td>
-            <td><span class="chip req">Live only</span></td>
+            <td><span class="chip opt">Broker option</span></td>
           </tr>
           <tr>
             <td><strong>Groww Trade API</strong><span class="note">TOTP or key + secret with daily approval</span></td>
-            <td>Optional source of daily candles. Not used for orders</td>
+            <td>One plan covers daily candles and live orders: limit buys at the open, GTT smart-order stops, holdings sync. History only from ~2020, so backfill from Yahoo</td>
             <td class="mono">growwapi, pyotp</td>
             <td class="mono">api.groww.in</td>
             <td><span class="chip paid">₹499/mo + GST</span></td>
+            <td><span class="chip opt">Broker option</span></td>
+          </tr>
+          <tr>
+            <td><strong>Telegram</strong><span class="note">Optional alerts</span></td>
+            <td>Daily paper and live reports, and any failure, sent to your phone</td>
+            <td class="mono">urllib (stdlib)</td>
+            <td class="mono">api.telegram.org</td>
+            <td><span class="chip free">Free</span></td>
             <td><span class="chip opt">Optional</span></td>
           </tr>
           <tr>
@@ -293,7 +301,7 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
     </div>
     <ul class="facts">
       <li><b>Cheapest live setup costs ₹0 a month:</b> Yahoo end-of-day data plus Kite Personal for orders, with zero brokerage on delivery.</li>
-      <li><b>Static IP:</b> Kite requires one for API orders since April 2026, so live trading runs from a fixed-IP machine or server.</li>
+      <li><b>Static IP:</b> SEBI's retail algo framework (from April 2026) requires API orders from a registered static IP with any broker, so live trading runs from a fixed-IP machine or server.</li>
       <li><b>Credentials</b> live in <code>.env</code> and <code>.secrets/</code>, both excluded from git. The bot never sends them anywhere except the provider they belong to.</li>
       <li><b>Daily bars only:</b> no live price stream or websocket, so the bot has no always-on connection to keep alive.</li>
     </ul>
@@ -320,11 +328,11 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
   <section aria-labelledby="h-day">
     <h2 id="h-day">A live trading day (IST)</h2>
     <div class="timeline">
-      <div class="tl"><time>08:45</time><div><b>Kite login</b><p><code>swingbot kite-login</code> stores today's access token in <code>.secrets/</code>.</p></div></div>
+      <div class="tl"><time>08:45</time><div><b>Kite login</b><p>Kite only: <code>swingbot kite-login</code> stores today's access token in <code>.secrets/</code>. Groww's TOTP login needs no daily step.</p></div></div>
       <div class="tl"><time>09:15</time><div><b>Market open</b><p>Yesterday's AMO limit buys and market sells execute at the open on NSE.</p></div></div>
-      <div class="tl"><time>09:20</time><div><b>Open phase</b><p><code>live --phase open --send</code> syncs fills from Kite and places GTT stops on new positions.</p></div></div>
+      <div class="tl"><time>09:16</time><div><b>Open phase</b><p><code>live --phase open --send</code> sends Groww's queued buys and sells (Groww has no after-market orders), syncs fills and places GTT stops on new positions.</p></div></div>
       <div class="tl"><time>15:30</time><div><b>Market close</b><p>Unfilled entry orders expire.</p></div></div>
-      <div class="tl"><time>15:45</time><div><b>Close phase</b><p><code>live --send</code> fetches the day's candles, syncs exits, runs the engine on today's close, then sends tomorrow's AMOs and trails stops upward.</p></div></div>
+      <div class="tl"><time>15:45</time><div><b>Close phase</b><p><code>live --send</code> refuses to run on stale data, fetches the day's candles into the database, syncs exits, runs the engine on today's close, trails stops upward and sends tomorrow's orders (Kite as after-market orders, Groww queued for the open).</p></div></div>
       <div class="tl"><time>16:15</time><div><b>Paper step</b><p><code>paper</code> advances the simulated book on the same data for comparison.</p></div></div>
     </div>
   </section>

@@ -13,8 +13,8 @@ fills replace the simulated ones.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from dataclasses import dataclass, field
-from datetime import date
 
 import pandas as pd
 
@@ -69,17 +69,23 @@ class Runner:
         self._panel = panel
 
     # ---------------------------------------------------------------- data
-    def update_data(self) -> None:
+    def db(self) -> D.MarketDB:
+        return D.MarketDB(self.cfg.data.db)
+
+    def update_data(self, full: bool = False) -> list[str]:
+        """Download new sessions into the local database. Returns symbols that failed."""
         dc = self.cfg.data
         if dc.provider == "synthetic":
-            return
+            return []
         D.load_env()
-        provider = D.get_provider(dc.provider)
-        D.fetch_universe(provider, D.load_universe(dc.universe), pd.Timestamp(dc.start).date(), date.today(),
-                         root=dc.cache_dir)
-        bp = dc.benchmark_provider
-        if bp and bp != dc.provider and D.benchmark_for(bp):
-            D.fetch_universe(D.get_provider(bp), [], pd.Timestamp(dc.start).date(), date.today(), root=dc.cache_dir)
+        from .market_clock import last_complete_session
+
+        update = D.get_provider(dc.provider)
+        history = D.get_provider(dc.history_provider) if dc.history_provider and dc.history_provider != dc.provider \
+            else update
+        # stop at the last finished session: a candle downloaded mid-day is incomplete
+        return D.sync_universe(self.db(), D.load_universe(dc.universe), update, history,
+                               pd.Timestamp(dc.start).date(), last_complete_session(), full=full)
 
     def panel(self, update: bool = False) -> Panel:
         if self._panel is not None and not update:
@@ -90,9 +96,7 @@ class Runner:
             return self._panel
         if update:
             self.update_data()
-        bprov = dc.benchmark_provider or dc.provider
-        self._panel = D.load_panel(dc.provider, D.load_universe(dc.universe), start=dc.start,
-                                   benchmark=D.benchmark_for(bprov), benchmark_provider=bprov, root=dc.cache_dir)
+        self._panel = D.load_panel(D.load_universe(dc.universe), start=dc.start, db=self.db())
         q = self._panel.quality_report()
         if len(q):
             log.warning("data quality issues (likely un-adjusted corporate actions):\n%s", q.to_string(index=False))
@@ -136,11 +140,20 @@ class Runner:
         return self._report("paper", new_book, closed, note=f"processed {T - t0} new session(s)")
 
     # ---------------------------------------------------------------- live
+    def halt_file(self) -> Path:
+        return self.cfg.state_dir("live") / "HALT"
+
     def live(self, phase: str = "close", update: bool = True, send: bool = False, broker=None,
-             force: bool = False) -> DailyReport:
-        """phase 'open'  : sync fills and place stops on new positions (after ~09:20)
-        phase 'close' : sync, decide on today's close, send tomorrow's orders (after ~15:45)"""
-        from .brokers.kite import get_broker
+             force: bool = False, check_clock: bool = True) -> DailyReport:
+        """phase 'close' (after ~15:45 IST): sync fills, decide on today's close, send what the
+                         broker accepts after hours (Kite: everything as AMO; Groww: stop updates)
+        phase 'open'  (after ~09:16 IST): sync fills, send what still has to go out
+                         (Kite: stops on new positions; Groww: queued buys/sells + stops)
+
+        Safety: refuses to decide on a close that is not today's finished session, refuses to
+        process the same day twice, and a HALT file blocks new entries (exits and stops still run)."""
+        from .brokers.base import get_broker
+        from .market_clock import now_ist, last_complete_session
 
         D.load_env()
         d = self.cfg.state_dir("live")
@@ -149,31 +162,49 @@ class Runner:
         panel = self.panel(update and phase == "close")
         eng = Engine(panel, self.cfg.active, self.cfg.risk)
         today = panel.dates[-1]
-        if phase == "close" and book.last_date == str(today.date()) and not force:
-            return self._report("live", book, pd.DataFrame(),
-                                note=f"{today.date()} already processed (use --force to redo)")
+        if phase == "close" and not force:
+            if book.last_date == str(today.date()):
+                return self._report("live", book, pd.DataFrame(),
+                                    note=f"{today.date()} already processed (use --force to redo)")
+            if check_clock and today.date() != last_complete_session():
+                return self._report("live", book, pd.DataFrame(), note=(
+                    f"latest bar is {today.date()}, but the latest finished session is {last_complete_session()} "
+                    f"(now {now_ist():%Y-%m-%d %H:%M} IST). Not deciding on stale or partial data -- run after "
+                    "15:35 IST on a trading day, check `swingbot db FILE status`, or pass --force."))
         broker = broker or get_broker(self.cfg.live.broker, self.cfg.live)
-        closed = pd.DataFrame(broker.sync(book, eng, pd.Timestamp.now().normalize() if phase == "open" else today,
-                                          final=phase == "close"))
+        sync_day = pd.Timestamp(now_ist().date()) if phase == "open" else today
+        closed = pd.DataFrame(broker.sync(book, eng, sync_day, final=phase == "close"))
         append_csv(d / "trades.csv", closed)
 
         if phase == "close":
             pos, acct = book.to_arrays(panel, eng.strategy_names)
             eng.decide(pos, acct, panel.shape[0] - 1)
             book = Book.from_arrays(pos, acct, panel, eng.strategy_names, today, meta=book.meta)
-            orders = plan_orders(book)
             append_csv(d / "equity.csv", pd.DataFrame({"date": [today.date()], "equity": [acct[K.EQUITY]],
                                                        "cash": [acct[K.CASH]], "positions": [len(book.positions)]}))
+        planned = plan_orders(book)
+        notes = []
+        if broker.supports_amo:
+            to_send = planned if phase == "close" else [o for o in planned if o.action == "STOP"]
         else:
-            orders = [o for o in plan_orders(book) if o.action == "STOP"]
+            to_send = [o for o in planned if o.action == "STOP"] if phase == "close" else planned
+            if phase == "close" and any(o.action != "STOP" for o in planned):
+                notes.append(f"{broker.name} has no after-market orders: BUY/SELL go out with "
+                             "`live --phase open --send` after 09:15 IST")
+        if self.halt_file().exists():
+            blocked = [o for o in to_send if o.action == "BUY"]
+            to_send = [o for o in to_send if o.action != "BUY"]
+            notes.append(f"HALTED ({self.halt_file()}): {len(blocked)} new entries blocked; exits and stops still run")
 
         really = send and not self.cfg.live.dry_run
-        if really:
+        if really and to_send:
             last = {p["symbol"]: p["last_close"] for p in book.positions}
-            broker.execute(book, orders, last)
+            broker.execute(book, to_send, last)
         book.save(bp)
-        note = "" if really else "DRY RUN -- nothing sent (needs --send and `dry_run = false` in [live])"
-        return self._report("live", book, closed, orders=orders, sent=really, note=note)
+        book.save(d / "history" / f"book-{book.last_date}-{phase}.json")  # daily snapshots for audits / recovery
+        if not really:
+            notes.append("DRY RUN -- nothing sent (needs --send and `dry_run = false` in [live])")
+        return self._report("live", book, closed, orders=to_send, sent=really, note="\n".join(notes))
 
     def status(self, mode: str = "paper") -> DailyReport:
         bp = self.cfg.state_dir(mode) / "book.json"

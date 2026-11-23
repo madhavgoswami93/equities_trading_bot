@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 from .base import DataProvider, load_env
-from .store import ParquetStore, fetch_universe, load_panel
+from .store import BENCHMARK, MarketDB, import_parquet, load_panel, sync_symbol, sync_universe
 from .synthetic import synthetic_panel
 
 UNIVERSE_DIR = Path(__file__).resolve().parents[2] / "data" / "universes"
@@ -28,10 +28,6 @@ def get_provider(name: str) -> DataProvider:
     raise ValueError(f"unknown provider {name!r}; use kite | groww | yahoo")
 
 
-def benchmark_for(provider: str) -> str | None:
-    return {"kite": "NIFTY 50", "yahoo": "^NSEI"}.get(provider)
-
-
 def load_universe(name_or_path: str) -> list[str]:
     """A universe is a CSV with a `symbol` column (data/universes/<name>.csv),
     or a comma-separated list of symbols."""
@@ -45,5 +41,5 @@ def load_universe(name_or_path: str) -> list[str]:
     raise FileNotFoundError(f"universe {name_or_path!r} not found in {UNIVERSE_DIR}")
 
 
-__all__ = ["DataProvider", "ParquetStore", "benchmark_for", "fetch_universe", "get_provider",
-           "load_env", "load_panel", "load_universe", "synthetic_panel"]
+__all__ = ["BENCHMARK", "DataProvider", "MarketDB", "get_provider", "import_parquet", "load_env", "load_panel",
+           "load_universe", "sync_symbol", "sync_universe", "synthetic_panel"]
