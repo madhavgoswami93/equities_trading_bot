@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>body{margin:0}</style>
+<title>Swingbot Architecture</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600&display=swap">
+<style>
+/* Layout: one reading column; the diagram is the hero, then the third-party register, then the daily routine. */
+:root {
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --fg: #15212c;
+  --muted: #5a6776;
+  --line: #d3dae2;
+  --zone: #e9eef3;
+  --accent: #1d5fd1;
+  --accent-soft: #e3ecfb;
+  --free: #17784a;
+  --free-soft: #e2f3ea;
+  --paid: #9a5b0e;
+  --paid-soft: #f8ecd9;
+  --font-display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1419; --surface: #171e26; --fg: #e4e9ef; --muted: #96a3b1; --line: #2c3743; --zone: #131a21;
+    --accent: #6aa0ff; --accent-soft: #1b2a42; --free: #4fc488; --free-soft: #15301f; --paid: #e0a656; --paid-soft: #35270f;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1419; --surface: #171e26; --fg: #e4e9ef; --muted: #96a3b1; --line: #2c3743; --zone: #131a21;
+  --accent: #6aa0ff; --accent-soft: #1b2a42; --free: #4fc488; --free-soft: #15301f; --paid: #e0a656; --paid-soft: #35270f;
+  color-scheme: dark;
+}
+
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.55; }
+.wrap { max-width: 1040px; margin: 0 auto; padding-block: 40px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 44px; }
+header { display: grid; gap: 10px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { font-family: var(--font-display); font-weight: 600; font-size: clamp(30px, 5vw, 44px); line-height: 1.05; margin: 0; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-weight: 600; font-size: 24px; margin: 0; text-wrap: balance; }
+.lede { max-width: 68ch; color: var(--muted); margin: 0; }
+section { display: grid; gap: 16px; min-width: 0; }
+section > p { margin: 0; max-width: 68ch; color: var(--muted); }
+code, .mono { font-family: var(--font-mono); font-size: .9em; }
+
+/* diagram */
+.diagram { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow-x: auto; }
+.diagram svg { display: block; width: 100%; min-width: 760px; height: auto; }
+.z-ext { fill: none; stroke: var(--line); stroke-dasharray: 5 5; }
+.z-local { fill: var(--zone); stroke: var(--line); }
+.box { fill: var(--surface); stroke: var(--line); stroke-width: 1.2; }
+.box-key { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.4; }
+.box-free { fill: var(--free-soft); stroke: var(--free); stroke-width: 1.2; }
+.box-paid { fill: var(--paid-soft); stroke: var(--paid); stroke-width: 1.2; }
+.group { fill: none; stroke: var(--muted); stroke-dasharray: 3 4; }
+.t-title { fill: var(--fg); font-family: var(--font-body); font-weight: 600; font-size: 14px; }
+.t-sub { fill: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+.t-zone { fill: var(--muted); font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; }
+.t-edge { fill: var(--muted); font-family: var(--font-mono); font-size: 10.5px; }
+.edge { fill: none; stroke: var(--muted); stroke-width: 1.4; }
+.edge-key { fill: none; stroke: var(--accent); stroke-width: 1.8; }
+.arrow { fill: var(--muted); }
+.arrow-key { fill: var(--accent); }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 13px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.sw { width: 14px; height: 14px; border-radius: 3px; border: 1.2px solid; }
+.sw.free { background: var(--free-soft); border-color: var(--free); }
+.sw.paid { background: var(--paid-soft); border-color: var(--paid); }
+.sw.key { background: var(--accent-soft); border-color: var(--accent); }
+
+/* third-party register */
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 760px; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+th { font-family: var(--font-mono); font-weight: 500; font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+tr:last-child td { border-bottom: 0; }
+td strong { display: block; font-weight: 600; }
+td .note { color: var(--muted); font-size: 13px; }
+.chip { display: inline-block; font-family: var(--font-mono); font-size: 11.5px; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+.chip.free { color: var(--free); background: var(--free-soft); }
+.chip.paid { color: var(--paid); background: var(--paid-soft); }
+.chip.opt { color: var(--muted); background: var(--zone); border: 1px solid var(--line); }
+.chip.req { color: var(--accent); background: var(--accent-soft); }
+
+/* modes + routine */
+.cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; display: grid; gap: 8px; align-content: start; }
+.card h3 { margin: 0; font-size: 16px; font-weight: 600; display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.card p { margin: 0; color: var(--muted); font-size: 14px; }
+.card code { color: var(--fg); }
+.timeline { display: grid; gap: 0; border-left: 2px solid var(--line); margin-left: 8px; }
+.tl { position: relative; padding: 4px 0 18px 24px; display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 4px 16px; }
+.tl::before { content: ""; position: absolute; left: -7px; top: 9px; width: 12px; height: 12px; border-radius: 50%; background: var(--surface); border: 2px solid var(--accent); }
+.tl time { font-family: var(--font-mono); font-size: 14px; font-weight: 500; }
+.tl div { min-width: 0; }
+.tl b { font-weight: 600; }
+.tl p { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
+.facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 28px; margin: 0; padding: 0; list-style: none; }
+.facts li { padding-left: 16px; position: relative; color: var(--muted); }
+.facts li::before { content: ""; position: absolute; left: 0; top: .7em; width: 6px; height: 6px; background: var(--accent); border-radius: 1px; }
+.facts b { color: var(--fg); font-weight: 600; }
+footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 16px; }
+
+@media (max-width: 760px) {
+  .cards, .facts { grid-template-columns: minmax(0, 1fr); }
+  .tl { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">equities_trading_bot · swingbot 0.2 · NSE cash equity, CNC delivery</div>
+    <h1>Swingbot Architecture</h1>
+    <p class="lede">One strategy file drives backtesting, paper trading and live trading through the same engine. Market data comes in from Yahoo, Groww or Kite. Orders go out only to Zerodha Kite, and everything else stays on your machine.</p>
+  </header>
+
+  <section aria-labelledby="h-diagram">
+    <h2 id="h-diagram">How the pieces connect</h2>
+    <div class="diagram" role="img" aria-label="Architecture diagram: third-party data and broker services at the top, the local swingbot system in the middle, GitHub at the bottom.">
+      <svg viewBox="0 0 960 660" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="arrow"/></marker>
+          <marker id="ak" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="arrow-key"/></marker>
+        </defs>
+
+        <!-- third parties -->
+        <rect class="z-ext" x="20" y="14" width="920" height="118" rx="10"/>
+        <text class="t-zone" x="36" y="34">THIRD PARTIES · INTERNET</text>
+        <rect class="box-free" x="36" y="46" width="200" height="70" rx="8"/>
+        <text class="t-title" x="52" y="72">Yahoo Finance</text>
+        <text class="t-sub" x="52" y="92">daily candles + Nifty 50</text>
+        <text class="t-sub" x="52" y="107">free · yfinance</text>
+        <rect class="box-paid" x="256" y="46" width="200" height="70" rx="8"/>
+        <text class="t-title" x="272" y="72">Groww Trade API</text>
+        <text class="t-sub" x="272" y="92">daily candles (from 2020)</text>
+        <text class="t-sub" x="272" y="107">optional · ₹499/mo</text>
+        <rect class="box-key" x="560" y="46" width="364" height="70" rx="8"/>
+        <text class="t-title" x="576" y="72">Zerodha Kite Connect</text>
+        <text class="t-sub" x="576" y="92">orders · GTT stops · holdings: free Personal plan</text>
+        <text class="t-sub" x="576" y="107">candles: Connect plan ₹500/mo · static IP for orders</text>
+
+        <!-- local system -->
+        <rect class="z-local" x="20" y="168" width="920" height="410" rx="10"/>
+        <text class="t-zone" x="36" y="190">YOUR MACHINE / SERVER</text>
+
+        <rect class="box" x="36" y="206" width="180" height="64" rx="8"/>
+        <text class="t-title" x="52" y="232">strategies.toml</text>
+        <text class="t-sub" x="52" y="252">signals · quantity · risk</text>
+
+        <rect class="box" x="256" y="206" width="170" height="64" rx="8"/>
+        <text class="t-title" x="272" y="232">Runner</text>
+        <text class="t-sub" x="272" y="252">single entry point</text>
+
+        <rect class="group" x="460" y="198" width="464" height="80" rx="8"/>
+        <rect class="box" x="472" y="210" width="136" height="56" rx="7"/>
+        <text class="t-title" x="488" y="234">backtest</text>
+        <text class="t-sub" x="488" y="252">fresh state</text>
+        <rect class="box" x="622" y="210" width="136" height="56" rx="7"/>
+        <text class="t-title" x="638" y="234">paper</text>
+        <text class="t-sub" x="638" y="252">resumed daily</text>
+        <rect class="box-key" x="772" y="210" width="140" height="56" rx="7"/>
+        <text class="t-title" x="788" y="234">live</text>
+        <text class="t-sub" x="788" y="252">brokers/kite.py</text>
+
+        <rect class="box" x="36" y="320" width="180" height="76" rx="8"/>
+        <text class="t-title" x="52" y="346">Price cache</text>
+        <text class="t-sub" x="52" y="366">data/cache/</text>
+        <text class="t-sub" x="52" y="381">*.parquet, incremental</text>
+
+        <rect class="box-key" x="256" y="320" width="668" height="76" rx="8"/>
+        <text class="t-title" x="272" y="346">Engine · numba kernel</text>
+        <text class="t-sub" x="272" y="366">on_open → on_intraday → on_close, one pass per trading day</text>
+        <text class="t-sub" x="272" y="381">max 5 open positions · none above 40% of equity · risk sizing · STT, GST, DP costs</text>
+
+        <rect class="box" x="36" y="446" width="180" height="76" rx="8"/>
+        <text class="t-title" x="52" y="472">.env · .secrets/</text>
+        <text class="t-sub" x="52" y="492">API keys, Kite token</text>
+        <text class="t-sub" x="52" y="507">git-ignored</text>
+
+        <rect class="box" x="256" y="446" width="330" height="76" rx="8"/>
+        <text class="t-title" x="272" y="472">Runs &amp; ledgers</text>
+        <text class="t-sub" x="272" y="492">runs/&lt;name&gt;/{backtest,paper,live}/</text>
+        <text class="t-sub" x="272" y="507">book.json · trades.csv · equity.csv</text>
+
+        <rect class="box" x="618" y="446" width="306" height="76" rx="8"/>
+        <text class="t-title" x="634" y="472">Streamlit dashboard</text>
+        <text class="t-sub" x="634" y="492">localhost:8501 · 5 tabs</text>
+        <text class="t-sub" x="634" y="507">read-only for live orders</text>
+
+        <text class="t-sub" x="36" y="556">Nothing calls in from outside: every connection is outbound request / response. No database, no cloud service.</text>
+
+        <!-- github -->
+        <rect class="z-ext" x="20" y="600" width="920" height="46" rx="10"/>
+        <text class="t-title" x="36" y="628">GitHub</text>
+        <text class="t-sub" x="100" y="628">repository + Actions CI: pytest (43 tests) on every push and pull request</text>
+
+        <!-- edges: data in -->
+        <path class="edge" d="M96 116 V150 H28 V358 H34" marker-end="url(#a)"/>
+        <path class="edge" d="M356 116 V150 H96"/>
+        <text class="t-edge" x="112" y="164">daily candles → price cache</text>
+        <!-- live <-> kite -->
+        <path class="edge-key" d="M842 118 V208" marker-start="url(#ak)" marker-end="url(#ak)"/>
+        <text class="t-edge" x="666" y="150">AMO orders · GTT stops</text>
+        <text class="t-edge" x="666" y="164">fill + holdings sync</text>
+        <!-- config -> runner -> modes -->
+        <path class="edge" d="M216 238 H254" marker-end="url(#a)"/>
+        <path class="edge" d="M426 238 H458" marker-end="url(#a)"/>
+        <!-- modes -> engine -->
+        <path class="edge" d="M692 278 V318" marker-end="url(#a)"/>
+        <!-- cache -> engine -->
+        <path class="edge" d="M216 358 H254" marker-end="url(#a)"/>
+        <!-- engine -> results -->
+        <path class="edge" d="M420 396 V444" marker-end="url(#a)"/>
+        <!-- results -> dashboard, dashboard -> engine -->
+        <path class="edge" d="M586 484 H616" marker-end="url(#a)"/>
+        <path class="edge" d="M800 444 V398" marker-end="url(#a)"/>
+        <text class="t-edge" x="808" y="426">runs backtests</text>
+        <!-- secrets -> live (dashed) -->
+        <path class="edge" d="M216 470 H236 V300 H842 V268" stroke-dasharray="4 4" marker-end="url(#a)"/>
+        <text class="t-edge" x="560" y="296">credentials</text>
+      </svg>
+    </div>
+    <div class="legend">
+      <span><i class="sw key"></i>Order path and engine core</span>
+      <span><i class="sw free"></i>Free service</span>
+      <span><i class="sw paid"></i>Paid, optional</span>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-third">
+    <h2 id="h-third">Third parties connected</h2>
+    <p>Only Kite can move money. Data providers are interchangeable through <code>[data] provider</code> in the strategy file.</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Service</th><th>Used for</th><th>Python library</th><th>Hosts contacted</th><th>Cost</th><th>Needed</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Yahoo Finance</strong><span class="note">Unofficial, no account or key</span></td>
+            <td>Daily OHLCV for the universe, Nifty 50 index (<span class="mono">^NSEI</span>) for the regime filter</td>
+            <td class="mono">yfinance</td>
+            <td class="mono">query1.finance.yahoo.com<br>query2.finance.yahoo.com</td>
+            <td><span class="chip free">Free</span></td>
+            <td><span class="chip req">Default data</span></td>
+          </tr>
+          <tr>
+            <td><strong>Zerodha Kite Connect</strong><span class="note">Daily login; access token expires each morning</span></td>
+            <td>Live: AMO entry and exit orders, GTT stop-losses, order history, holdings reconciliation. Optional: historical candles</td>
+            <td class="mono">kiteconnect</td>
+            <td class="mono">api.kite.trade<br>kite.zerodha.com (login)</td>
+            <td><span class="chip free">Orders free</span><br><span class="chip paid">Data ₹500/mo</span></td>
+            <td><span class="chip req">Live only</span></td>
+          </tr>
+          <tr>
+            <td><strong>Groww Trade API</strong><span class="note">TOTP or key + secret with daily approval</span></td>
+            <td>Optional source of daily candles. Not used for orders</td>
+            <td class="mono">growwapi, pyotp</td>
+            <td class="mono">api.groww.in</td>
+            <td><span class="chip paid">₹499/mo + GST</span></td>
+            <td><span class="chip opt">Optional</span></td>
+          </tr>
+          <tr>
+            <td><strong>GitHub</strong></td>
+            <td>Code hosting, pull requests, Actions CI running the test suite</td>
+            <td class="mono">—</td>
+            <td class="mono">github.com</td>
+            <td><span class="chip free">Free</span></td>
+            <td><span class="chip req">Yes</span></td>
+          </tr>
+          <tr>
+            <td><strong>PyPI</strong><span class="note">Install time only</span></td>
+            <td>numpy, pandas, numba, pyarrow, streamlit, plotly and the SDKs above</td>
+            <td class="mono">pip</td>
+            <td class="mono">pypi.org<br>files.pythonhosted.org</td>
+            <td><span class="chip free">Free</span></td>
+            <td><span class="chip req">Setup</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <ul class="facts">
+      <li><b>Cheapest live setup costs ₹0 a month:</b> Yahoo end-of-day data plus Kite Personal for orders, with zero brokerage on delivery.</li>
+      <li><b>Static IP:</b> Kite requires one for API orders since April 2026, so live trading runs from a fixed-IP machine or server.</li>
+      <li><b>Credentials</b> live in <code>.env</code> and <code>.secrets/</code>, both excluded from git. The bot never sends them anywhere except the provider they belong to.</li>
+      <li><b>Daily bars only:</b> no live price stream or websocket, so the bot has no always-on connection to keep alive.</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="h-modes">
+    <h2 id="h-modes">Three modes, one engine</h2>
+    <div class="cards">
+      <div class="card">
+        <h3>Backtest <span class="chip opt">history</span></h3>
+        <p>Starts from empty state and runs the kernel across the full price history. Writes stats, trades and equity to <code>runs/&lt;name&gt;/backtest/</code>.</p>
+      </div>
+      <div class="card">
+        <h3>Paper <span class="chip opt">daily</span></h3>
+        <p>Loads yesterday's <code>book.json</code> and runs the same kernel over the new bars only. A test confirms it reproduces the backtest trade for trade.</p>
+      </div>
+      <div class="card">
+        <h3>Live <span class="chip req">Kite</span></h3>
+        <p>Real Kite fills replace the simulated ones, then the same close-of-day decision runs. Dry run until <code>dry_run = false</code> and <code>--send</code>.</p>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-day">
+    <h2 id="h-day">A live trading day (IST)</h2>
+    <div class="timeline">
+      <div class="tl"><time>08:45</time><div><b>Kite login</b><p><code>swingbot kite-login</code> stores today's access token in <code>.secrets/</code>.</p></div></div>
+      <div class="tl"><time>09:15</time><div><b>Market open</b><p>Yesterday's AMO limit buys and market sells execute at the open on NSE.</p></div></div>
+      <div class="tl"><time>09:20</time><div><b>Open phase</b><p><code>live --phase open --send</code> syncs fills from Kite and places GTT stops on new positions.</p></div></div>
+      <div class="tl"><time>15:30</time><div><b>Market close</b><p>Unfilled entry orders expire.</p></div></div>
+      <div class="tl"><time>15:45</time><div><b>Close phase</b><p><code>live --send</code> fetches the day's candles, syncs exits, runs the engine on today's close, then sends tomorrow's AMOs and trails stops upward.</p></div></div>
+      <div class="tl"><time>16:15</time><div><b>Paper step</b><p><code>paper</code> advances the simulated book on the same data for comparison.</p></div></div>
+    </div>
+  </section>
+
+  <footer>Source: madhavgoswami93/equities_trading_bot, pull request #2. Broker pricing changes often; confirm on zerodha.com/charges and groww.in before subscribing.</footer>
+</div>
+
+</body>
+</html>

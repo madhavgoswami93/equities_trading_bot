@@ -88,7 +88,9 @@ python -m swingbot dashboard strategies.toml        # http://localhost:8501
 | **Signals today** | Every entry signal on the latest close and what the risk rules did with it: ordered, already held, strategy cap reached, no free slot, or regime off |
 | **Strategy file** | Edit the TOML in the browser. **Validate** computes every strategy's signals; **Save** validates first and keeps a `.bak` copy |
 
-Light and dark themes are both supported.
+Light and dark themes are both supported. An **Architecture** tab shows the system diagram and the
+third-party services. The same page is in [`docs/architecture.html`](docs/architecture.html): open the file
+directly, or serve it on its own with `python -m swingbot docs` (http://127.0.0.1:8000/architecture.html).
 
 ## The strategy file
 

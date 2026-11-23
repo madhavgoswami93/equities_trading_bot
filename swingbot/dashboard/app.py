@@ -20,6 +20,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from swingbot.brokers.base import plan_orders
 from swingbot.config import load_config
@@ -126,8 +127,8 @@ except Exception as e:  # noqa: BLE001
 
 st.sidebar.caption(f"{panel.shape[1]} symbols, {panel.dates[0].date()} to **{panel.dates[-1].date()}**")
 
-tab_bt, tab_paper, tab_live, tab_sig, tab_file = st.tabs(
-    ["Backtest", "Paper trading", "Live", "Signals today", "Strategy file"])
+tab_bt, tab_paper, tab_live, tab_sig, tab_file, tab_arch = st.tabs(
+    ["Backtest", "Paper trading", "Live", "Signals today", "Strategy file", "Architecture"])
 
 
 # --------------------------------------------------------------- backtest
@@ -402,3 +403,12 @@ with tab_file:
                     "**Logic:** `and or not`, `< <= > >= == !=`, `+ - * / **`  \n"
                     "**Functions:** " + ", ".join(f"`{f}`" for f in FUNCTIONS) + "  \n"
                     "**Quantity:** `risk` | `risk 0.5%` | `equity 20%` | `shares 50` | `amount 100000`")
+
+
+# ------------------------------------------------------------ architecture
+ARCH_PAGE = Path(__file__).resolve().parents[2] / "docs" / "architecture.html"
+with tab_arch:
+    if ARCH_PAGE.exists():
+        components.html(ARCH_PAGE.read_text(), height=2900, scrolling=True)
+    else:
+        st.info(f"Architecture page not found at {ARCH_PAGE}.")

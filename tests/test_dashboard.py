@@ -41,7 +41,8 @@ def test_dashboard_renders_all_tabs(tmp_path):
     at.run()
     assert not at.exception, [e.value for e in at.exception]
     assert not at.error, [e.value for e in at.error]
-    assert [t.label for t in at.tabs] == ["Backtest", "Paper trading", "Live", "Signals today", "Strategy file"]
+    assert [t.label for t in at.tabs] == ["Backtest", "Paper trading", "Live", "Signals today", "Strategy file",
+                                             "Architecture"]
     metrics = {m.label: m.value for m in at.metric}
     assert int(metrics["Max positions held"]) <= 5
 

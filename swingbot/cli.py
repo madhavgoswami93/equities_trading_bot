@@ -129,6 +129,20 @@ def cmd_dashboard(a):
     sys.exit(subprocess.call(cmd))
 
 
+def cmd_docs(a):
+    import functools
+    import http.server
+
+    root = Path(__file__).resolve().parents[1] / "docs"
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(root))
+    with http.server.ThreadingHTTPServer(("127.0.0.1", a.port), handler) as srv:
+        print(f"architecture page on http://127.0.0.1:{a.port}/architecture.html  (Ctrl+C to stop)")
+        try:
+            srv.serve_forever()
+        except KeyboardInterrupt:
+            pass
+
+
 def cmd_kite_login(a):
     from .data import load_env
     from .data.kite import interactive_login
@@ -212,6 +226,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = cmd("dashboard", cmd_dashboard, "open the web dashboard (needs the [dashboard] extra)")
     p.add_argument("--port", type=int, default=8501)
+
+    p = sub.add_parser("docs", help="serve the architecture page locally")
+    p.add_argument("--port", type=int, default=8000)
+    p.set_defaults(func=cmd_docs)
 
     p = sub.add_parser("kite-login", help="generate today's Kite access token")
     p.set_defaults(func=cmd_kite_login)
