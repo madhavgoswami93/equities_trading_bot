@@ -8,10 +8,9 @@ environment, in order of preference:
     GROWW_API_KEY + GROWW_API_SECRET         -- key/secret flow (approve daily
                                                 on the Groww Cloud API keys page)
 
-Groww documents equity candles from 2020 onward and caps daily candles at 180
-days per request on the current `get_historical_candles` endpoint, so long
-histories are fetched in 180-day chunks. Use Kite (or Yahoo for research) when
-you need data before 2020.
+Groww's API docs mention equity candles from 2020, but the current ₹499 plan
+lists "Historical Data (up to 3 months)". Treat Groww as a daily-update source:
+with `broker = "groww"` the long backfill comes from Yahoo automatically.
 """
 
 from __future__ import annotations

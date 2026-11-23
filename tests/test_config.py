@@ -82,7 +82,7 @@ def test_single_broker_drives_data_and_orders(tmp_path):
     f = tmp_path / "s.toml"
     f.write_text('broker = "groww"\n[data]\nuniverse = "nifty50"\n[[strategy]]\nname = "x"\ntype = "breakout"\n')
     cfg = load_config(f)
-    assert (cfg.data.provider, cfg.live.broker, cfg.data.history_provider) == ("groww", "groww", None)
+    assert (cfg.data.provider, cfg.live.broker, cfg.data.history_provider) == ("groww", "groww", "yahoo")
     f.write_text('broker = "kite"\n[data]\nhistory_provider = "yahoo"\n[[strategy]]\nname = "x"\ntype = "breakout"\n')
     cfg = load_config(f)
     assert (cfg.data.provider, cfg.live.broker, cfg.data.history_provider) == ("kite", "kite", "yahoo")

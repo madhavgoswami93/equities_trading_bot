@@ -213,6 +213,8 @@ def load_config(path: str | Path) -> RunConfig:
             raise ValueError(f"{path}: broker must be 'kite' or 'groww', not {broker!r}")
         data.setdefault("provider", broker)
         live.setdefault("broker", broker)
+        if broker == "groww":  # Groww's plan includes only ~3 months of candles: too little to backtest
+            data.setdefault("history_provider", "yahoo")
     strategies = [_build_strategy(s) for s in raw.get("strategy", [])]
     if not strategies:
         raise ValueError(f"{path}: define at least one [[strategy]]")

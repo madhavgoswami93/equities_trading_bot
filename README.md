@@ -32,16 +32,19 @@ Set one line at the top of `strategies.toml`, and prices, history and orders all
 broker = "kite"     # or "groww"
 ```
 
-| `broker =` | Data + orders | Daily history for backtests | Cost per month |
-|---|---|---|---|
-| `"kite"` (Connect plan) | Kite | 10+ years, adjusted for splits and bonuses | ~₹500 |
-| `"groww"` | Groww | From ~2020 only (about 6 years) | ~₹499 + GST |
-| *(no broker line)* | Yahoo, research and paper only | 15+ years, free, unofficial | ₹0 |
+| `broker =` | Orders | Live data | History for backtests | Cost per month |
+|---|---|---|---|---|
+| `"kite"` (Connect plan) | Kite | Kite | Kite: daily candles adjusted for splits and bonuses, 10+ years | ₹500 per app |
+| `"groww"` | Groww | Groww | Only ~3 months on the current plan, so backfilled from Yahoo automatically | ₹499 + GST |
+| *(no broker line)* | none (research and paper only) | Yahoo | Yahoo: 15+ years, free, unofficial | ₹0 |
 
-Without Nifty index candles from the broker (Groww), the market filter uses an equal-weight
-index of your stock list instead. To backtest further back than Groww allows, add
-`history_provider = "yahoo"` under `[data]`: the one-off backfill then comes from Yahoo, and daily
-updates still come from your broker.
+**Recommended single API: Kite Connect.** It's the only one where orders, live data and backtest
+history all come from one paid plan. Zerodha also charges ₹0 brokerage on delivery (DP ₹15.34 per
+scrip sold), and from November 2026 gives ₹500 of developer credits in any month you pay ₹500 or more
+in brokerage. Groww charges ₹20 or 0.1% (whichever is lower) per delivery order, and about ₹20 + GST DP per sell.
+
+Without Nifty index candles from the broker, the market filter uses an equal-weight index of your
+stock list instead.
 
 SEBI's retail algo framework (in force from April 2026) requires API orders to come from a static IP
 registered with your broker, whichever broker you use. Broker pricing changes often, so check

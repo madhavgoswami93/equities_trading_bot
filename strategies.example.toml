@@ -9,8 +9,9 @@
 name = "core_swing"            # state goes to runs/<name>/{backtest,paper,live}/
 
 # One API for everything: prices, history and orders all come from this broker.
-#   "kite"  -- Kite Connect plan (~Rs 500/mo): data + orders, adjusted daily history for 10+ years
-#   "groww" -- Groww Trade API (~Rs 499/mo): data + orders, daily history only from ~2020
+#   "kite"  -- Kite Connect plan (Rs 500/mo): live data, historical candles and orders in one API
+#   "groww" -- Groww Trade API (Rs 499/mo + GST): live data and orders, but only ~3 months of
+#              history, so the long backfill comes from free Yahoo automatically
 # Delete this line to research for free on Yahoo data without any broker account.
 # broker = "kite"
 

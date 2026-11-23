@@ -168,8 +168,8 @@ def test_window_run_and_determinism():
 
 def test_cost_model_zerodha_and_groww():
     cm = CostModel.zerodha()
-    assert np.isclose(cm.buy(100_000), 100 + 2.97 + 0.10 + 15 + 0.18 * 3.07)
-    assert np.isclose(cm.sell(100_000), 100 + 2.97 + 0.10 + 0.18 * 3.07 + 15.93)
+    assert np.isclose(cm.buy(100_000), 100 + 3.07 + 0.10 + 15 + 0.18 * 3.17)
+    assert np.isclose(cm.sell(100_000), 100 + 3.07 + 0.10 + 0.18 * 3.17 + 15.34)
     assert np.isclose(CostModel.groww().buy(1_000) - cm.buy(1_000), 5 * 1.18)
     assert np.isclose(CostModel.groww().buy(1_000_000) - cm.buy(1_000_000), 20 * 1.18)
 

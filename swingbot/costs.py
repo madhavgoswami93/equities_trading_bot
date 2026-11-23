@@ -26,11 +26,11 @@ class CostModel:
     brokerage_max: float = 0.0  # Rs per order (cap, 0 = no cap)
     stt_buy: float = 0.001  # Securities Transaction Tax, delivery buy 0.1%
     stt_sell: float = 0.001  # delivery sell 0.1%
-    exchange_txn: float = 0.0000297  # NSE transaction charge
+    exchange_txn: float = 0.0000307  # NSE transaction charge (0.00307%)
     sebi: float = 0.000001  # Rs 10 per crore
     stamp_buy: float = 0.00015  # stamp duty on buy side 0.015%
     gst: float = 0.18  # on brokerage + exchange txn + SEBI fees
-    dp_per_sell: float = 15.93  # depository charge per scrip per sell day (incl. GST)
+    dp_per_sell: float = 15.34  # Zerodha DP charge per scrip per sell day: 3.5 CDSL + 9.5 + 18% GST
 
     def as_array(self) -> np.ndarray:
         return np.array(astuple(self), dtype=np.float64)
@@ -43,7 +43,8 @@ class CostModel:
 
     @classmethod
     def groww(cls) -> CostModel:
-        """Groww equity delivery: 0.1% brokerage, min Rs 5, max Rs 20 per order."""
+        """Groww equity delivery: 0.1% brokerage, min Rs 5, max Rs 20 per order;
+        DP Rs 3.5 depository + Rs 16.5 Groww per sell, plus 18% GST."""
         return cls(brokerage_pct=0.001, brokerage_min=5.0, brokerage_max=20.0, dp_per_sell=23.6)
 
     @classmethod
