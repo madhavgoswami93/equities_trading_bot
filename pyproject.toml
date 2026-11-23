@@ -20,8 +20,9 @@ kite = ["kiteconnect>=5"]
 groww = ["growwapi", "pyotp"]
 yahoo = ["yfinance>=0.2.40"]
 plot = ["matplotlib>=3.8"]
+dashboard = ["streamlit>=1.40", "plotly>=5.20"]
 dev = ["pytest>=8", "ruff>=0.5"]
-all = ["swingbot[kite,groww,yahoo,plot,dev]"]
+all = ["swingbot[kite,groww,yahoo,plot,dashboard,dev]"]
 
 [project.scripts]
 swingbot = "swingbot.cli:main"

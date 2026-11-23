@@ -73,6 +73,23 @@ Example cron entries (server clock in IST):
 15 16 * * 1-5  cd ~/equities_trading_bot && python -m swingbot paper strategies.toml >> runs/paper.log 2>&1
 ```
 
+## Dashboard
+
+```bash
+pip install -e ".[dashboard]"
+python -m swingbot dashboard strategies.toml        # http://localhost:8501
+```
+
+| Tab | What it shows |
+|---|---|
+| **Backtest** | Pick strategies, choose a date range and optionally override the risk rules for this run. Shows key stats, equity vs Nifty 50, drawdown, realised PnL by strategy, exit reasons, a monthly-returns heatmap, results by stock, and a filterable trade list you can export as CSV |
+| **Paper trading** | Current positions with their weight against the 40% cap, distance to stop, orders for the next session, the equity curve and closed trades. A button runs today's paper step |
+| **Live** | Read-only view of the live book. Orders are only ever sent from the CLI |
+| **Signals today** | Every entry signal on the latest close and what the risk rules did with it: ordered, already held, strategy cap reached, no free slot, or regime off |
+| **Strategy file** | Edit the TOML in the browser. **Validate** computes every strategy's signals; **Save** validates first and keeps a `.bak` copy |
+
+Light and dark themes are both supported.
+
 ## The strategy file
 
 ```toml
@@ -143,6 +160,7 @@ swingbot/
   brokers/
     base.py           plan_orders: book -> BUY / SELL / STOP orders (same for paper and live)
     kite.py           Zerodha: AMO entries/exits, GTT stops, fill sync, holdings reconciliation
+  dashboard/          Streamlit app (app.py) + Plotly charts (charts.py)
   data/               yahoo, kite, groww, synthetic providers + incremental Parquet cache
   panel.py            the universe as aligned (dates x symbols) arrays + data-quality report
   costs.py            STT, exchange, SEBI, stamp, GST, DP (Zerodha / Groww presets)

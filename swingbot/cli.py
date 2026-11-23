@@ -119,6 +119,16 @@ def cmd_walkforward(a):
     print(wf.summary())
 
 
+def cmd_dashboard(a):
+    import subprocess
+
+    app = Path(__file__).resolve().parent / "dashboard" / "app.py"
+    cmd = [sys.executable, "-m", "streamlit", "run", str(app), "--server.port", str(a.port),
+           "--server.headless", "true", "--", "--file", a.file]
+    print(f"dashboard on http://localhost:{a.port}  (Ctrl+C to stop)")
+    sys.exit(subprocess.call(cmd))
+
+
 def cmd_kite_login(a):
     from .data import load_env
     from .data.kite import interactive_login
@@ -199,6 +209,9 @@ def build_parser() -> argparse.ArgumentParser:
         else:
             p.add_argument("--train-years", type=float, default=3)
             p.add_argument("--test-years", type=float, default=1)
+
+    p = cmd("dashboard", cmd_dashboard, "open the web dashboard (needs the [dashboard] extra)")
+    p.add_argument("--port", type=int, default=8501)
 
     p = sub.add_parser("kite-login", help="generate today's Kite access token")
     p.set_defaults(func=cmd_kite_login)
