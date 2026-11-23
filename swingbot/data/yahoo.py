@@ -1,8 +1,12 @@
 """Yahoo Finance provider (pip install yfinance) -- free, no account needed.
 
-Good enough for strategy research (split/bonus-adjusted, 20+ years for large
-caps) but unofficial and occasionally patchy; validate final numbers on Kite
-data before trading real money.
+Good enough for strategy research (20+ years for large caps) but unofficial and
+occasionally patchy; validate final numbers on Kite data before trading real money.
+
+Prices are adjusted for splits and bonuses only, not for dividends (Yahoo's
+"auto adjust"), so they match the prices you actually trade at and Kite's
+adjustment. Yahoo adjusts some demergers (ITC Hotels, Jan 2025) but not others
+(Tata Motors, Oct 2025: shows as a fake crash in the quality report); Kite adjusts them.
 """
 
 from __future__ import annotations
@@ -31,6 +35,6 @@ class YahooProvider(DataProvider):
         logging.getLogger("yfinance").setLevel(logging.CRITICAL)  # we report failures ourselves, once
 
         df = yf.Ticker(self.ticker(symbol)).history(
-            start=str(start), end=str(pd.Timestamp(end).date() + timedelta(days=1)), auto_adjust=True, actions=False
+            start=str(start), end=str(pd.Timestamp(end).date() + timedelta(days=1)), auto_adjust=False, actions=False
         )
         return self.normalize(df)

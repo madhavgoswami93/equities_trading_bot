@@ -4,6 +4,7 @@ See strategies.example.toml for a fully commented example."""
 
 from __future__ import annotations
 
+import logging
 import re
 import tomllib
 from dataclasses import dataclass, field, fields, replace
@@ -14,6 +15,8 @@ import numpy as np
 from .costs import CostModel
 from .engine import kernel as K
 from .strategies import REGISTRY, Strategy
+
+log = logging.getLogger(__name__)
 
 
 # ----------------------------------------------------------------------- risk
@@ -211,8 +214,12 @@ def load_config(path: str | Path) -> RunConfig:
     if broker:  # one API for everything: prices, history and orders come from the same broker
         if broker not in ("kite", "groww"):
             raise ValueError(f"{path}: broker must be 'kite' or 'groww', not {broker!r}")
-        data.setdefault("provider", broker)
-        live.setdefault("broker", broker)
+        for section, key, given in (("data", "provider", data.get("provider")), ("live", "broker", live.get("broker"))):
+            if given and given != broker:
+                log.warning("%s: [%s] %s = %r is overridden by broker = %r (remove it to silence this)",
+                            path, section, key, given, broker)
+        data["provider"] = broker
+        live["broker"] = broker
         if broker == "groww":  # Groww's plan includes only ~3 months of candles: too little to backtest
             data.setdefault("history_provider", "yahoo")
     strategies = [_build_strategy(s) for s in raw.get("strategy", [])]

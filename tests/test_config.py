@@ -86,6 +86,8 @@ def test_single_broker_drives_data_and_orders(tmp_path):
     f.write_text('broker = "kite"\n[data]\nhistory_provider = "yahoo"\n[[strategy]]\nname = "x"\ntype = "breakout"\n')
     cfg = load_config(f)
     assert (cfg.data.provider, cfg.live.broker, cfg.data.history_provider) == ("kite", "kite", "yahoo")
+    f.write_text('broker = "kite"\n[data]\nprovider = "yahoo"\n[[strategy]]\nname = "x"\ntype = "breakout"\n')
+    assert load_config(f).data.provider == "kite"  # the single-broker line wins over a leftover provider
     f.write_text('broker = "upstox"\n[[strategy]]\nname = "x"\ntype = "breakout"\n')
     with pytest.raises(ValueError, match="broker must be"):
         load_config(f)
