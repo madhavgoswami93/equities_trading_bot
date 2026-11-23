@@ -427,7 +427,7 @@ with tab_res:
                               default=[c for c in R.CAP_ORDER if c in set(study.get("cap", []))])
         min_turn = f3.number_input("Min turnover (₹ cr/day)", 0.0, 10000.0, 0.0, 0.5)
         g1, g2, g3 = st.columns([2, 1, 1])
-        pmax = float(np.nanpercentile(study.price, 99.5)) if len(study) else 1000.0
+        pmax = float(np.ceil(np.nanmax(study.price))) if len(study) else 1000.0
         prange = g1.slider("Price range (₹)", 0.0, max(pmax, 10.0), (0.0, max(pmax, 10.0)))
         inds = g2.multiselect("Industry", sorted(study.industry.dropna().unique()) if "industry" in study else [])
         mkts = g3.multiselect("Nifty regime", sorted(study.market.dropna().unique()) if "market" in study else [])
@@ -435,7 +435,9 @@ with tab_res:
         t = study[study.strategy.isin(strats)]
         if caps and "cap" in t:
             t = t[t.cap.isin(caps)]
-        t = t[(t.turnover.fillna(0) >= min_turn) & t.price.between(*prange)]
+        t = t[t.turnover.fillna(0) >= min_turn]
+        if prange != (0.0, max(pmax, 10.0)):  # only filter when the slider was moved
+            t = t[t.price.between(*prange)]
         if inds:
             t = t[t.industry.isin(inds)]
         if mkts:
@@ -463,7 +465,8 @@ with tab_res:
             st.plotly_chart(C.bucket_chart(tb, metric, metrics[metric], MODE, pct), width="stretch")
             tbs = R.bucket_table(t, factor, by_strategy=True, quantiles=quint)
             st.subheader(f"Strategy × {R.FACTORS[factor].lower()}")
-            st.plotly_chart(C.strategy_bucket_heatmap(tbs, metric, MODE, pct), width="stretch")
+            st.plotly_chart(C.strategy_bucket_heatmap(tbs, metric, MODE, pct, order=list(tb["bucket"])),
+                            width="stretch")
             st.dataframe(tb.style.format({"win_rate": "{:.1%}", "avg_return": "{:.2%}", "median_return": "{:.2%}",
                                           "expectancy_r": "{:.2f}", "profit_factor": "{:.2f}", "avg_hold": "{:.1f}",
                                           "pnl_per_lakh": "{:,.0f}"}), width="stretch", hide_index=True)

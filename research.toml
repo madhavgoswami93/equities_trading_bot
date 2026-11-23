@@ -178,3 +178,45 @@ max_hold = 15
 min_price = 10
 min_turnover_cr = 0.5
 regime_sma = 0
+
+# ---------------------------------------------------------------------------
+#  Candidates found by the Nov 2026 study (Yahoo data, Apr 2025 - Nov 2026): mean reversion
+#  only paid after costs on volatile or strongly trending stocks, in both halves of the period.
+#  Found by searching many splits, so treat them as hypotheses: paper trade before real money.
+# ---------------------------------------------------------------------------
+
+# 13. RSI(2) dip on volatile stocks (ATR at least 4.9% of price).
+[[strategy]]
+name = "rsi2_dip_volatile"
+entry = "close > sma(close, 100) and rsi(close, 2) < 10 and atr(14) / close >= 0.049"
+exit = "close > sma(close, 5)"
+stop = "3 * atr(14)"
+score = "atr(14) / close"
+max_hold = 10
+min_price = 10
+min_turnover_cr = 0.5
+regime_sma = 0
+
+# 14. RSI(2) dip in strong leaders (close more than 13% above the 50-day average).
+[[strategy]]
+name = "rsi2_dip_leaders"
+entry = "close > sma(close, 50) * 1.13 and rsi(close, 2) < 10"
+exit = "close > sma(close, 5)"
+stop = "3 * atr(14)"
+score = "close / sma(close, 50)"
+max_hold = 10
+min_price = 10
+min_turnover_cr = 0.5
+regime_sma = 0
+
+# 15. Bollinger reversion on volatile stocks.
+[[strategy]]
+name = "bollinger_volatile"
+entry = "close > sma(close, 100) and close < sma(close, 20) - 2 * stdev(close, 20) and atr(14) / close >= 0.049"
+exit = "close > sma(close, 20)"
+stop = "2.5 * atr(14)"
+score = "atr(14) / close"
+max_hold = 10
+min_price = 10
+min_turnover_cr = 0.5
+regime_sma = 0

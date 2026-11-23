@@ -154,11 +154,13 @@ def bucket_chart(df: pd.DataFrame, metric: str, label: str, mode: str, pct: bool
 DIVERGING = {"avg_return", "median_return", "expectancy_r", "pnl_per_lakh"}
 
 
-def strategy_bucket_heatmap(df: pd.DataFrame, metric: str, mode: str, pct: bool) -> go.Figure:
+def strategy_bucket_heatmap(df: pd.DataFrame, metric: str, mode: str, pct: bool, order: list | None = None) -> go.Figure:
     """Strategy x bucket grid. Signed metrics use the red-grey-blue diverging scale around 0;
     win rate / profit factor / trades use a single-hue scale."""
     ink = INK[mode]
-    pv = df.pivot(index="strategy", columns="bucket", values=metric)
+    pv = df.assign(bucket=df["bucket"].astype(str)).pivot(index="strategy", columns="bucket", values=metric)
+    if order:  # keep the buckets' natural order (large -> other, cheap -> expensive), not alphabetical
+        pv = pv.reindex(columns=[str(b) for b in order if str(b) in pv.columns])
     z = pv.to_numpy(dtype=float)
     fmt = (lambda v: f"{v:+.1%}") if pct else (lambda v: f"{v:,.2f}")
     text = np.vectorize(lambda v: "" if not np.isfinite(v) else fmt(v))(z)

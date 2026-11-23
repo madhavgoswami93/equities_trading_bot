@@ -110,7 +110,10 @@ class Runner:
         self._panel = D.load_panel(D.load_universe(dc.universe), start=dc.start, db=self.db())
         q = self._panel.quality_report()
         if len(q):
-            log.warning("data quality issues (likely un-adjusted corporate actions):\n%s", q.to_string(index=False))
+            head = q.head(12).to_string(index=False)
+            more = f"\n... and {len(q) - 12} more (Panel.quality_report() lists all)" if len(q) > 12 else ""
+            log.warning("data quality: %d stocks have overnight gaps over 35%% (unadjusted corporate actions, "
+                        "or real news):\n%s%s", len(q), head, more)
         return self._panel
 
     # ------------------------------------------------------------ backtest
