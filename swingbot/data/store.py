@@ -1,7 +1,8 @@
 """Local market database: one DuckDB file holds every daily bar you have ever downloaded.
 
     data/market.duckdb
-      bars_daily   symbol, date, open, high, low, close, volume, source, fetched_at   (PK symbol, date)
+      bars_daily     symbol, date, open, high, low, close, volume, source, fetched_at   (PK symbol, date)
+      bars_intraday  symbol, interval, ts (IST), open, high, low, close, volume, source  (e.g. 5-minute)
       fetch_log    logged_at, provider, symbol, from_date, to_date, rows, status, message
 
 Why a database and not files: one file to back up, SQL for ad-hoc questions
@@ -21,6 +22,7 @@ the symbol's whole history is re-downloaded from the history provider.
 from __future__ import annotations
 
 import logging
+import time
 from contextlib import contextmanager
 from datetime import date, timedelta
 from pathlib import Path
@@ -40,6 +42,10 @@ create table if not exists bars_daily (
     open double, high double, low double, close double, volume double,
     source varchar, fetched_at timestamp default current_timestamp,
     primary key (symbol, date));
+create table if not exists bars_intraday (
+    symbol varchar not null, interval varchar not null, ts timestamp not null,
+    open double, high double, low double, close double, volume double,
+    source varchar, primary key (symbol, interval, ts));
 create table if not exists fetch_log (
     logged_at timestamp default current_timestamp, provider varchar, symbol varchar,
     from_date date, to_date date, rows integer, status varchar, message varchar);
@@ -135,6 +141,44 @@ class MarketDB:
             c.execute("commit")
         return len(rows)
 
+    # ------------------------------------------------------------ intraday
+    def upsert_intraday(self, symbol: str, interval: str, df: pd.DataFrame, source: str) -> int:
+        if df is None or df.empty:
+            return 0
+        rows = df[OHLCV].copy()
+        rows.insert(0, "ts", pd.DatetimeIndex(rows.index))
+        rows.insert(0, "interval", interval)
+        rows.insert(0, "symbol", symbol)
+        rows["source"] = source
+        with self._conn() as c:
+            c.register("incoming", rows.reset_index(drop=True))
+            c.execute("insert or replace into bars_intraday select * from incoming")
+        return len(rows)
+
+    def last_ts(self, symbol: str, interval: str):
+        with self._conn(read_only=True) as c:
+            r = c.execute("select max(ts) from bars_intraday where symbol = ? and interval = ?",
+                          [symbol, interval]).fetchone()
+        return r[0] if r and r[0] else None
+
+    def read_intraday(self, symbol: str, interval: str = "5minute", start=None, end=None) -> pd.DataFrame | None:
+        q = "select ts, open, high, low, close, volume from bars_intraday where symbol = ? and interval = ?"
+        args: list = [symbol, interval]
+        if start is not None:
+            q += " and ts >= ?"
+            args.append(pd.Timestamp(start).to_pydatetime())
+        if end is not None:
+            q += " and ts < ?"
+            args.append((pd.Timestamp(end) + pd.Timedelta(days=1)).to_pydatetime())
+        with self._conn(read_only=True) as c:
+            df = c.execute(q + " order by ts", args).df()
+        return None if df.empty else df.set_index(pd.DatetimeIndex(df.pop("ts"), name="ts"))
+
+    def intraday_coverage(self) -> pd.DataFrame:
+        with self._conn(read_only=True) as c:
+            return c.execute("""select interval, count(distinct symbol) symbols, min(ts) first, max(ts) last,
+                                count(*) bars from bars_intraday group by interval""").df()
+
     def log_fetch(self, provider, symbol, start, end, rows, status, message=""):
         with self._conn() as c:
             c.execute("insert into fetch_log (provider, symbol, from_date, to_date, rows, status, message) "
@@ -191,18 +235,80 @@ def sync_symbol(db: MarketDB, symbol: str, update: DataProvider, history: DataPr
     return n
 
 
+class _Progress:
+    def __init__(self, total: int, what: str):
+        self.total, self.what, self.done, self.t0 = total, what, 0, time.monotonic()
+
+    def step(self, symbol: str, msg: str) -> None:
+        self.done += 1
+        el = time.monotonic() - self.t0
+        eta = el / self.done * (self.total - self.done)
+        log.info("[%d/%d %s] %s %s  (elapsed %s, ~%s left)", self.done, self.total, self.what, symbol, msg,
+                 _hms(el), _hms(eta))
+
+
+def _hms(sec: float) -> str:
+    sec = int(sec)
+    return f"{sec // 3600}h{sec % 3600 // 60:02d}m" if sec >= 3600 else f"{sec // 60}m{sec % 60:02d}s"
+
+
 def sync_universe(db: MarketDB, symbols: list[str], update: DataProvider, history: DataProvider | None,
                   start: date, end: date | None = None, full: bool = False) -> list[str]:
-    """Update every symbol plus the benchmark. Returns the symbols that failed."""
-    failed = []
-    todo = list(symbols) + [BENCHMARK]
-    for i, s in enumerate(todo, 1):
+    """Update every symbol plus the benchmark. Returns the symbols that failed.
+
+    Symbols never seen before are backfilled in bulk when the history provider has a bulk
+    endpoint (Yahoo: ~100 tickers per request); the rest are updated one by one. Safe to
+    interrupt: everything already written stays, and the next run continues from there."""
+    end = end or date.today()
+    history = history or update
+    todo = list(dict.fromkeys(list(symbols) + [BENCHMARK]))
+    have = set() if full else set(db.coverage().symbol)
+    missing = [s for s in todo if s not in have and s != BENCHMARK and _provider_symbol(history, s)]
+    failed: list[str] = []
+    if missing and type(history).daily_many is not DataProvider.daily_many:
+        log.info("bulk backfill of %d symbols from %s", len(missing), history.name)
+        got = history.daily_many(missing, start, end)
+        for s in missing:
+            df = got.get(s)
+            if df is None or df.empty:
+                db.log_fetch(history.name, s, start, end, 0, "error", "no data returned")
+                failed.append(s)
+            else:
+                db.log_fetch(history.name, s, start, end, db.upsert(s, df, history.name, replace=True), "backfill")
+        todo = [s for s in todo if s not in missing]
+    prog = _Progress(len(todo), "daily")
+    for s in todo:
         try:
             n = sync_symbol(db, s, update, history, start, end, full=full)
-            log.info("[%d/%d] %s: +%d rows", i, len(todo), s, n)
+            prog.step(s, f"+{n} rows")
         except Exception as e:  # noqa: BLE001 - one bad symbol must not stop the run
-            log.warning("[%d/%d] %s failed: %s", i, len(todo), s, e)
+            prog.step(s, f"FAILED: {e}")
             db.log_fetch(getattr(update, "name", "?"), s, start, end, 0, "error", e)
+            failed.append(s)
+    return failed
+
+
+def sync_intraday(db: MarketDB, symbols: list[str], provider: DataProvider, interval: str,
+                  start: date, end: date | None = None) -> list[str]:
+    """Download intraday candles (e.g. 5-minute) for every symbol, resuming from the last
+    stored candle. Interrupt and re-run at will. Returns symbols that failed."""
+    end = end or date.today()
+    failed = []
+    prog = _Progress(len(symbols), interval)
+    for s in symbols:
+        try:
+            last = db.last_ts(s, interval)
+            since = pd.Timestamp(last).date() if last is not None else pd.Timestamp(start).date()
+            if since > end:
+                prog.step(s, "up to date")
+                continue
+            df = provider.intraday(s, since, end, interval)
+            n = db.upsert_intraday(s, interval, df, provider.name)
+            db.log_fetch(provider.name, s, since, end, n, f"intraday:{interval}")
+            prog.step(s, f"+{n} candles")
+        except Exception as e:  # noqa: BLE001
+            prog.step(s, f"FAILED: {e}")
+            db.log_fetch(provider.name, s, start, end, 0, "error", e)
             failed.append(s)
     return failed
 

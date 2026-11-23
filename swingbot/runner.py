@@ -72,8 +72,9 @@ class Runner:
     def db(self) -> D.MarketDB:
         return D.MarketDB(self.cfg.data.db)
 
-    def update_data(self, full: bool = False) -> list[str]:
-        """Download new sessions into the local database. Returns symbols that failed."""
+    def update_data(self, full: bool = False, intraday: bool | None = None, daily: bool = True) -> list[str]:
+        """Download new sessions into the local database. Returns symbols that failed.
+        intraday=None follows `[data] intraday` in the strategy file."""
         dc = self.cfg.data
         if dc.provider == "synthetic":
             return []
@@ -84,8 +85,18 @@ class Runner:
         history = D.get_provider(dc.history_provider) if dc.history_provider and dc.history_provider != dc.provider \
             else update
         # stop at the last finished session: a candle downloaded mid-day is incomplete
-        return D.sync_universe(self.db(), D.load_universe(dc.universe), update, history,
-                               pd.Timestamp(dc.start).date(), last_complete_session(), full=full)
+        symbols = D.load_universe(dc.universe)
+        failed = []
+        if daily:
+            failed += D.sync_universe(self.db(), symbols, update, history, pd.Timestamp(dc.start).date(),
+                                      last_complete_session(), full=full)
+        want = dc.intraday if intraday is None or intraday is True else None
+        if intraday is True and not want:
+            want = "5minute"
+        if want:
+            failed += D.sync_intraday(self.db(), symbols, update, want,
+                                      pd.Timestamp(dc.intraday_start or dc.start).date(), last_complete_session())
+        return sorted(set(failed))
 
     def panel(self, update: bool = False) -> Panel:
         if self._panel is not None and not update:

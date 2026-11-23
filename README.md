@@ -131,6 +131,31 @@ static IP, such as a small cloud VM. A laptop that sleeps will miss runs.
 15 16 * * 1-5  cd ~/equities_trading_bot && .venv/bin/python -m swingbot paper strategies.toml
 ```
 
+## Research: every NSE stock, 12 strategies, results by stock type
+
+```bash
+python -m swingbot universe build                      # 2,600 NSE stocks + cap class + industry (from NSE's files)
+python -m swingbot fetch research.toml                 # daily since Oct 2024 (+ 5-minute with `intraday = "5minute"`)
+python -m swingbot research research.toml --start 2025-04-01 --by cap price turnover volume
+python -m swingbot dashboard research.toml             # Research tab: filter and split by any factor
+```
+
+* **Universe:** NSE's own `EQUITY_L.csv` (EQ and BE series). The market-cap class comes from
+  index membership, the same cut-offs SEBI/AMFI use: large = Nifty 100, mid = Midcap 150,
+  small = Smallcap 250, micro = Microcap 250, other = the rest. Industry comes from the same files.
+* **Signal study:** every signal becomes its own ₹1 lakh trade, with no slot or cash limits.
+  This measures each strategy's raw edge per trade. Each trade is tagged with the stock's price,
+  20-day volume, turnover, cap class, industry, volatility, 3-month momentum, distance from its
+  50-day average and the Nifty regime on the signal day. Results can be split by any of these.
+* **Portfolio backtest:** the same strategy under your `[risk]` rules (5 positions, 40% cap),
+  for a realistic equity curve.
+* **5-minute candles** (`intraday = "5minute"`, Kite) are stored in `bars_intraday` for intraday
+  analysis. Signals use daily candles, the standard for 1-day to 3-week holds. A full NSE
+  download takes about 1.5 hours at Kite's 3 requests a second, and it resumes where it stopped.
+* **Caveats:** the stock list and cap classes are as of today, so stocks delisted before today
+  are missing (survivorship bias). About 20 months of history is one market regime, so use
+  the results to choose what to study further, not as proof that a strategy works.
+
 ## Dashboard
 
 ```bash

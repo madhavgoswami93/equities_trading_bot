@@ -21,7 +21,7 @@ from datetime import date, timedelta
 
 import pandas as pd
 
-from .base import DataProvider, require_env
+from .base import DataProvider, require_env, with_retry
 
 MAX_DAYS_PER_CALL = 180
 EARLIEST = date(2020, 1, 1)  # Groww serves equity daily candles from 2020
@@ -80,3 +80,31 @@ class GrowwProvider(DataProvider):
                 chunks.append(df.set_index("date"))
             cur = to + timedelta(days=1)
         return self.normalize(pd.concat(chunks) if chunks else None)
+
+    def intraday(self, symbol: str, start: date, end: date, interval: str = "5minute") -> pd.DataFrame:
+        """Groww serves intraday candles for the last ~3 months only (15 days per 5-minute request)."""
+        g = self.g
+        const = {"minute": "CANDLE_INTERVAL_MIN_1", "5minute": "CANDLE_INTERVAL_MIN_5",
+                 "15minute": "CANDLE_INTERVAL_MIN_15", "30minute": "CANDLE_INTERVAL_MIN_30",
+                 "60minute": "CANDLE_INTERVAL_HOUR_1"}[interval]
+        step = {"minute": 7, "5minute": 15, "15minute": 30, "30minute": 30, "60minute": 150}[interval]
+        cur = max(pd.Timestamp(start).date(), date.today() - timedelta(days=90))
+        end = pd.Timestamp(end).date()
+        chunks = []
+        while cur <= end:
+            to = min(cur + timedelta(days=step - 1), end)
+            wait = MIN_INTERVAL_S - (time.monotonic() - self._last)
+            if wait > 0:
+                time.sleep(wait)
+            resp = with_retry(g.get_historical_candles, exchange=g.EXCHANGE_NSE, segment=g.SEGMENT_CASH,
+                              groww_symbol=f"{self.exchange}-{symbol}", start_time=f"{cur} 09:15:00",
+                              end_time=f"{to} 15:30:00", candle_interval=getattr(g, const))
+            self._last = time.monotonic()
+            candles = (resp or {}).get("candles") or []
+            if candles:
+                df = pd.DataFrame([row[:6] for row in candles], columns=["ts", "open", "high", "low", "close", "volume"])
+                t = df["ts"]
+                df["ts"] = pd.to_datetime(t, unit="s") if pd.api.types.is_numeric_dtype(t) else pd.to_datetime(t)
+                chunks.append(df.set_index("ts"))
+            cur = to + timedelta(days=1)
+        return self.normalize_intraday(pd.concat(chunks) if chunks else None)

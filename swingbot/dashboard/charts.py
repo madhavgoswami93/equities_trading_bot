@@ -135,6 +135,50 @@ def bar_chart(series: pd.Series, mode: str, fmt: str = ",.0f", title: str | None
     return fig
 
 
+def bucket_chart(df: pd.DataFrame, metric: str, label: str, mode: str, pct: bool) -> go.Figure:
+    """One bar per bucket in the bucket's natural order (not sorted by value). Bars below
+    zero use the diverging red so a losing bucket reads at a glance."""
+    ink, pal = INK[mode], SERIES[mode]
+    y = df[metric].to_numpy(dtype=float)
+    colors = [ink["red"] if (v < 0 and metric in DIVERGING) else pal[0] for v in y]
+    fig = go.Figure(go.Bar(x=[str(b) for b in df["bucket"]], y=y, marker=dict(color=colors, line=dict(width=0)),
+                           customdata=df["trades"],
+                           hovertemplate="%{x}<br>" + label + ": %{y:" + (".2%" if pct else ",.2f") + "}"
+                                         "<br>trades: %{customdata:,}<extra></extra>"))
+    fig.update_yaxes(tickformat=".1%" if pct else ",.2f", zeroline=True, zerolinecolor=ink["axis"])
+    _layout(fig, mode, 320, legend=False)
+    fig.update_layout(hovermode="closest", bargap=0.3)
+    return fig
+
+
+DIVERGING = {"avg_return", "median_return", "expectancy_r", "pnl_per_lakh"}
+
+
+def strategy_bucket_heatmap(df: pd.DataFrame, metric: str, mode: str, pct: bool) -> go.Figure:
+    """Strategy x bucket grid. Signed metrics use the red-grey-blue diverging scale around 0;
+    win rate / profit factor / trades use a single-hue scale."""
+    ink = INK[mode]
+    pv = df.pivot(index="strategy", columns="bucket", values=metric)
+    z = pv.to_numpy(dtype=float)
+    fmt = (lambda v: f"{v:+.1%}") if pct else (lambda v: f"{v:,.2f}")
+    text = np.vectorize(lambda v: "" if not np.isfinite(v) else fmt(v))(z)
+    if metric in DIVERGING:
+        lim = np.nanmax(np.abs(z)) if np.isfinite(z).any() else 1
+        scale, zmin, zmax = [[0, ink["red"]], [0.5, ink["mid"]], [1, ink["blue"]]], -lim, lim
+    else:
+        scale = [[0, ink["mid"]], [1, ink["blue"]]]
+        zmin, zmax = np.nanmin(z), np.nanmax(z)
+    fig = go.Figure(go.Heatmap(z=z, x=[str(c) for c in pv.columns], y=list(pv.index), zmin=zmin, zmax=zmax,
+                               colorscale=scale, xgap=2, ygap=2, text=text, texttemplate="%{text}",
+                               hovertemplate="%{y} · %{x}: %{text}<extra></extra>",
+                               colorbar=dict(thickness=10, outlinewidth=0, tickformat=".0%" if pct else ",.1f")))
+    fig.update_yaxes(autorange="reversed", showgrid=False)
+    fig.update_xaxes(showgrid=False, side="top")
+    _layout(fig, mode, max(240, 30 * len(pv) + 80), legend=False)
+    fig.update_layout(hovermode="closest")
+    return fig
+
+
 def _alpha(hex_color: str, a: float) -> str:
     h = hex_color.lstrip("#")
     r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))

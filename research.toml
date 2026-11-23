@@ -1,0 +1,180 @@
+# ============================================================================
+#  Research file: 12 swing strategies (1 day to 3 weeks) tested on every NSE stock.
+#
+#     python -m swingbot universe build                 # all NSE stocks + cap class + industry
+#     python -m swingbot fetch research.toml            # daily candles since Oct 2024 (add --intraday for 5-min)
+#     python -m swingbot research research.toml --start 2025-04-01
+#     python -m swingbot dashboard research.toml        # Research tab: strip results by bucket
+#
+#  Lookbacks are kept at or under 126 sessions because history starts in Oct 2024,
+#  and there is no market-regime filter (regime_sma = 0): the Nifty regime is a
+#  factor you can split results by instead.
+# ============================================================================
+
+name = "research"
+broker = "kite"                # Kite Connect: daily + 5-minute history. Remove for free Yahoo daily data.
+
+[data]
+universe = "nse_all"           # built by `swingbot universe build`
+start = "2024-10-01"
+intraday = "5minute"           # also stored; signals use daily candles
+
+[risk]                          # used by the portfolio backtest of each strategy
+capital = 1000000
+max_positions = 5
+max_position_pct = 0.40
+risk_per_trade = 0.01
+max_adv_pct = 0.02
+max_entry_gap = 0.05
+slippage_bps = 15               # small caps are less liquid than Nifty 50
+costs = "zerodha"
+
+# --- common settings for every strategy below:
+#     min_price = 10, min_turnover_cr = 0.5 (Rs 50 lakh/day), regime_sma = 0
+
+# 1. Connors RSI(2): buy a sharp 1-2 day dip inside an uptrend, sell into the bounce.
+#    Larry Connors & Cesar Alvarez, "Short Term Trading Strategies That Work" (2008).
+[[strategy]]
+name = "rsi2_dip"
+entry = "close > sma(close, 100) and rsi(close, 2) < 10"
+exit = "close > sma(close, 5)"
+stop = "3 * atr(14)"
+score = "-rsi(close, 2)"
+max_hold = 10
+min_price = 10
+min_turnover_cr = 0.5
+regime_sma = 0
+
+# 2. Three lower closes in an uptrend (Connors "3-day high/low" family).
+[[strategy]]
+name = "three_down_days"
+entry = "close > sma(close, 100) and close < prev(close) and prev(close) < prev(close, 2) and prev(close, 2) < prev(close, 3)"
+exit = "close > sma(close, 5)"
+stop = "3 * atr(14)"
+score = "roc(close, 63)"
+max_hold = 10
+min_price = 10
+min_turnover_cr = 0.5
+regime_sma = 0
+
+# 3. Bollinger Band mean reversion: close below the lower band while the trend is up.
+#    John Bollinger, "Bollinger on Bollinger Bands".
+[[strategy]]
+name = "bollinger_reversion"
+entry = "close > sma(close, 100) and close < sma(close, 20) - 2 * stdev(close, 20)"
+exit = "close > sma(close, 20)"
+stop = "2.5 * atr(14)"
+score = "roc(close, 63)"
+max_hold = 10
+min_price = 10
+min_turnover_cr = 0.5
+regime_sma = 0
+
+# 4. 20-day breakout on 1.5x volume (Donchian / Darvas box style).
+[[strategy]]
+name = "breakout20_volume"
+entry = "close > prev(highest(high, 20)) and volume > 1.5 * avg_volume(20) and close > sma(close, 50)"
+stop = "2 * atr(14)"
+trail = "3 * atr(14)"
+score = "roc(close, 63)"
+max_hold = 15
+min_price = 10
+min_turnover_cr = 0.5
+regime_sma = 0
+
+# 5. Six-month high momentum: new 120-day closing high.
+#    George & Hwang (2004), "The 52-Week High and Momentum Investing" (shortened for our history).
+[[strategy]]
+name = "six_month_high"
+entry = "close > prev(highest(close, 120)) and roc(close, 20) > 0"
+stop = "2.5 * atr(14)"
+trail = "3 * atr(14)"
+score = "roc(close, 120)"
+max_hold = 15
+min_price = 10
+min_turnover_cr = 0.5
+regime_sma = 0
+
+# 6. EMA 9/21 crossover in an uptrend.
+[[strategy]]
+name = "ema9_21_cross"
+entry = "crossover(ema(close, 9), ema(close, 21)) and close > sma(close, 100)"
+exit = "crossunder(ema(close, 9), ema(close, 21))"
+stop = "2 * atr(14)"
+score = "roc(close, 63)"
+max_hold = 15
+min_price = 10
+min_turnover_cr = 0.5
+regime_sma = 0
+
+# 7. MACD signal-line cross above the 50-day average. Gerald Appel.
+[[strategy]]
+name = "macd_cross"
+entry = "crossover(ema(close, 12) - ema(close, 26), ema(ema(close, 12) - ema(close, 26), 9)) and close > sma(close, 50)"
+exit = "crossunder(ema(close, 12) - ema(close, 26), ema(ema(close, 12) - ema(close, 26), 9))"
+stop = "2.5 * atr(14)"
+score = "roc(close, 63)"
+max_hold = 15
+min_price = 10
+min_turnover_cr = 0.5
+regime_sma = 0
+
+# 8. Supertrend flip (popular with Indian traders; built-in strategy).
+[[strategy]]
+name = "supertrend_flip"
+type = "supertrend"
+st_len = 10
+st_mult = 3.0
+min_price = 10
+min_turnover_cr = 0.5
+regime_sma = 0
+
+# 9. NR7 breakout: the narrowest range of 7 days, then a close above that day's high.
+#    Toby Crabel, "Day Trading with Short Term Price Patterns and Opening Range Breakout".
+[[strategy]]
+name = "nr7_breakout"
+entry = "prev(high - low) <= prev(lowest(high - low, 7)) and close > prev(high) and close > sma(close, 50)"
+stop = "max(close - prev(low), atr(14))"
+trail = "2 * atr(14)"
+score = "roc(close, 63)"
+max_hold = 7
+min_price = 10
+min_turnover_cr = 0.5
+regime_sma = 0
+
+# 10. Volume thrust: a strong up day (+3% from the open) on 3x volume at a 20-day high.
+[[strategy]]
+name = "volume_thrust"
+entry = "close > open * 1.03 and volume > 3 * avg_volume(20) and close >= highest(close, 20)"
+stop = "2 * atr(14)"
+trail = "3 * atr(14)"
+score = "volume / avg_volume(20)"
+max_hold = 10
+min_price = 10
+min_turnover_cr = 0.5
+regime_sma = 0
+
+# 11. Volatility squeeze breakout: tight Bollinger bandwidth, then a close above the upper band.
+[[strategy]]
+name = "squeeze_breakout"
+entry = "prev(4 * stdev(close, 20) / sma(close, 20)) < 0.08 and close > sma(close, 20) + 2 * stdev(close, 20)"
+stop = "2 * atr(14)"
+trail = "3 * atr(14)"
+score = "roc(close, 63)"
+max_hold = 15
+min_price = 10
+min_turnover_cr = 0.5
+regime_sma = 0
+
+# 12. Momentum pullback: strong 6-month leaders reclaiming their 20-day EMA.
+#     Jegadeesh & Titman (1993) momentum; NSE's Nifty200 Momentum 30 uses 6/12-month returns.
+[[strategy]]
+name = "momentum_pullback"
+entry = "roc(close, 126) > 0.3 and close > ema(close, 20) and prev(close) < prev(ema(close, 20))"
+stop = "2 * atr(14)"
+trail = "3 * atr(14)"
+score = "roc(close, 126)"
+max_hold = 15
+min_price = 10
+min_turnover_cr = 0.5
+regime_sma = 0

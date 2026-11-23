@@ -127,8 +127,8 @@ except Exception as e:  # noqa: BLE001
 
 st.sidebar.caption(f"{panel.shape[1]} symbols, {panel.dates[0].date()} to **{panel.dates[-1].date()}**")
 
-tab_bt, tab_paper, tab_live, tab_sig, tab_file, tab_arch = st.tabs(
-    ["Backtest", "Paper trading", "Live", "Signals today", "Strategy file", "Architecture"])
+tab_bt, tab_res, tab_paper, tab_live, tab_sig, tab_file, tab_arch = st.tabs(
+    ["Backtest", "Research", "Paper trading", "Live", "Signals today", "Strategy file", "Architecture"])
 
 
 # --------------------------------------------------------------- backtest
@@ -406,6 +406,74 @@ with tab_file:
 
 
 # ------------------------------------------------------------ architecture
+# ---------------------------------------------------------------- research
+with tab_res:
+    from swingbot import research as R
+
+    rdir = Path(cfg.runs_dir) / cfg.name / "research"
+    tfile = rdir / "signal_trades.parquet"
+    if not tfile.exists():
+        st.info(f"No research run yet. Run `python -m swingbot research {file}` and reload this tab.")
+    else:
+        study = pd.read_parquet(tfile)
+        board = pd.read_csv(rdir / "leaderboard.csv") if (rdir / "leaderboard.csv").exists() else None
+        st.caption(f"{len(study):,} signal trades, {study.symbol.nunique():,} stocks, "
+                   f"{study.entry_date.min():%d %b %Y} to {study.exit_date.max():%d %b %Y}. Every signal is one "
+                   "₹1 lakh trade (signal study). Filter, then pick a factor to split results by.")
+
+        f1, f2, f3 = st.columns([2, 1, 1])
+        strats = f1.multiselect("Strategies", sorted(study.strategy.unique()), default=sorted(study.strategy.unique()))
+        caps = f2.multiselect("Market cap", [c for c in R.CAP_ORDER if c in set(study.get("cap", []))],
+                              default=[c for c in R.CAP_ORDER if c in set(study.get("cap", []))])
+        min_turn = f3.number_input("Min turnover (₹ cr/day)", 0.0, 10000.0, 0.0, 0.5)
+        g1, g2, g3 = st.columns([2, 1, 1])
+        pmax = float(np.nanpercentile(study.price, 99.5)) if len(study) else 1000.0
+        prange = g1.slider("Price range (₹)", 0.0, max(pmax, 10.0), (0.0, max(pmax, 10.0)))
+        inds = g2.multiselect("Industry", sorted(study.industry.dropna().unique()) if "industry" in study else [])
+        mkts = g3.multiselect("Nifty regime", sorted(study.market.dropna().unique()) if "market" in study else [])
+
+        t = study[study.strategy.isin(strats)]
+        if caps and "cap" in t:
+            t = t[t.cap.isin(caps)]
+        t = t[(t.turnover.fillna(0) >= min_turn) & t.price.between(*prange)]
+        if inds:
+            t = t[t.industry.isin(inds)]
+        if mkts:
+            t = t[t.market.isin(mkts)]
+
+        s_all = R.summarize(t)
+        m = st.columns(6)
+        m[0].metric("Trades", f"{s_all.get('trades', 0):,}")
+        m[1].metric("Win rate", fmt_pct(s_all.get("win_rate", np.nan)))
+        m[2].metric("Avg return / trade", fmt_pct(s_all.get("avg_return", np.nan)))
+        m[3].metric("Expectancy", f"{fmt_num(s_all.get('expectancy_r', np.nan))} R")
+        m[4].metric("Profit factor", fmt_num(s_all.get("profit_factor", np.nan)))
+        m[5].metric("Avg hold", f"{fmt_num(s_all.get('avg_hold', np.nan), 1)} days")
+
+        h1, h2, h3 = st.columns([2, 2, 1])
+        factor = h1.selectbox("Split by", list(R.FACTORS), format_func=lambda k: R.FACTORS[k], index=3)
+        metrics = {"avg_return": "Avg return per trade", "win_rate": "Win rate", "expectancy_r": "Expectancy (R)",
+                   "profit_factor": "Profit factor", "median_return": "Median return", "trades": "Trades"}
+        metric = h2.selectbox("Metric", list(metrics), format_func=lambda k: metrics[k])
+        quint = h3.toggle("Quintiles", value=False, help="Split numeric factors into 5 equal-count groups")
+        pct = metric in ("avg_return", "win_rate", "median_return")
+        if len(t) and factor in t:
+            tb = R.bucket_table(t, factor, quantiles=quint)
+            st.subheader(f"{metrics[metric]} by {R.FACTORS[factor].lower()}")
+            st.plotly_chart(C.bucket_chart(tb, metric, metrics[metric], MODE, pct), width="stretch")
+            tbs = R.bucket_table(t, factor, by_strategy=True, quantiles=quint)
+            st.subheader(f"Strategy × {R.FACTORS[factor].lower()}")
+            st.plotly_chart(C.strategy_bucket_heatmap(tbs, metric, MODE, pct), width="stretch")
+            st.dataframe(tb.style.format({"win_rate": "{:.1%}", "avg_return": "{:.2%}", "median_return": "{:.2%}",
+                                          "expectancy_r": "{:.2f}", "profit_factor": "{:.2f}", "avg_hold": "{:.1f}",
+                                          "pnl_per_lakh": "{:,.0f}"}), width="stretch", hide_index=True)
+        if board is not None:
+            st.subheader("Leaderboard (all trades, before filters)")
+            st.caption("signal_*: every signal, ₹1 lakh each. portfolio_*: the same strategy under your [risk] rules.")
+            st.dataframe(board.round(4), width="stretch", hide_index=True)
+        st.download_button("Download filtered trades (CSV)", t.to_csv(index=False), "research_trades.csv", "text/csv")
+
+
 ARCH_PAGE = Path(__file__).resolve().parents[2] / "docs" / "architecture.html"
 with tab_arch:
     if ARCH_PAGE.exists():

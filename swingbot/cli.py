@@ -17,6 +17,8 @@ import sys
 import time
 from pathlib import Path
 
+import pandas as pd
+
 from .config import load_config
 from .runner import Runner
 
@@ -56,11 +58,30 @@ def cmd_init(a):
 
 def cmd_fetch(a):
     r = _runner(a)
-    failed = r.update_data(full=a.full)
-    cov = r.db().coverage()
-    print(f"{len(cov)} symbols in {r.cfg.data.db}, latest session {cov['last'].max() if len(cov) else '-'}")
+    logging.getLogger("swingbot.data.store").setLevel(logging.INFO)  # progress + ETA for long downloads
+    if not logging.getLogger().handlers or logging.getLogger().level > logging.INFO:
+        logging.getLogger().setLevel(logging.INFO)
+        for h in logging.getLogger().handlers:
+            h.setLevel(logging.INFO)
+    intraday = True if a.intraday else (False if a.no_intraday else None)
+    failed = r.update_data(full=a.full, intraday=intraday, daily=not a.intraday_only)
+    db = r.db()
+    cov = db.coverage()
+    print(f"\n{len(cov)} symbols (daily) in {r.cfg.data.db}, latest session {cov['last'].max() if len(cov) else '-'}")
+    ic = db.intraday_coverage()
+    if len(ic):
+        print(ic.to_string(index=False))
     if failed:
-        print("failed:", ", ".join(failed))
+        print(f"{len(failed)} failed (renamed, delisted or no data): {', '.join(failed[:30])}"
+              f"{' ...' if len(failed) > 30 else ''}  -- details: swingbot db FILE log")
+
+
+def cmd_universe(a):
+    from .data.universe import build_nse_universe
+
+    u = build_nse_universe(a.out)
+    print(f"wrote {a.out}: {len(u)} NSE stocks ({', '.join(f'{k} {v}' for k, v in u.cap.value_counts().items())})")
+    print('use it with  [data] universe = "nse_all"  in the strategy file')
 
 
 def cmd_db(a):
@@ -219,6 +240,59 @@ def cmd_docs(a):
             pass
 
 
+def cmd_research(a):
+    from . import research as R
+    from .data import UNIVERSE_DIR
+    from .data.universe import universe_meta
+
+    r = _runner(a)
+    panel = r.panel()
+    specs = [r.cfg.strategy(n) for n in a.strategy] if a.strategy else r.cfg.active
+    upath = Path(r.cfg.data.universe)
+    upath = upath if upath.exists() else UNIVERSE_DIR / f"{r.cfg.data.universe}.csv"
+    meta = universe_meta(upath) if upath.exists() else None
+    t0 = time.perf_counter()
+    study = R.signal_study(panel, specs, r.cfg.risk, a.start, a.end, meta)
+    board = R.leaderboard(panel, specs, r.cfg.risk, study, a.start, a.end)
+    out = Path(r.cfg.runs_dir) / r.cfg.name / "research"
+    out.mkdir(parents=True, exist_ok=True)
+    study.to_parquet(out / "signal_trades.parquet", index=False)
+    board.to_csv(out / "leaderboard.csv", index=False)
+    print(f"{panel.shape[1]} stocks, {len(specs)} strategies, {len(study):,} signal trades in "
+          f"{time.perf_counter() - t0:.0f}s  ({a.start or panel.dates[0].date()} -> {a.end or panel.dates[-1].date()})\n")
+    cols = {"strategy": "strategy", "signal_trades": "signals", "signal_win_rate": "win%",
+            "signal_avg_return": "avg ret", "signal_expectancy_r": "exp R", "signal_profit_factor": "PF",
+            "signal_avg_hold": "hold", "portfolio_return": "port ret", "portfolio_sharpe": "port Sharpe",
+            "portfolio_max_dd": "port maxDD"}
+    show = board[list(cols)].rename(columns=cols)
+    for c in ("win%", "avg ret", "port ret", "port maxDD"):
+        show[c] = show[c].map(lambda v: f"{v:.1%}" if pd.notna(v) else "n/a")
+    print("Leaderboard (signal study: every signal, Rs 1 lakh each | portfolio: your [risk] rules)")
+    print(show.round(2).to_string(index=False))
+    for f in a.by:
+        if f not in study:
+            print(f"\n(no factor {f!r}; choose from {', '.join(R.FACTORS)})")
+            continue
+        tb = R.bucket_table(study, f)
+        tb.to_csv(out / f"by_{f}.csv", index=False)
+        print(f"\nAll strategies by {R.FACTORS.get(f, f)}")
+        print(_fmt_buckets(tb).to_string(index=False))
+    print(f"\nsaved to {out}/  -- explore every factor in the dashboard's Research tab")
+
+
+def _fmt_buckets(tb):
+    tb = tb.copy()
+    for c in ("win_rate", "avg_return", "median_return"):
+        if c in tb:
+            tb[c] = tb[c].map(lambda v: f"{v:.1%}")
+    for c in ("expectancy_r", "profit_factor", "avg_hold"):
+        if c in tb:
+            tb[c] = tb[c].map(lambda v: f"{v:.2f}")
+    if "pnl_per_lakh" in tb:
+        tb["pnl_per_lakh"] = tb["pnl_per_lakh"].map(lambda v: f"{v:,.0f}")
+    return tb
+
+
 def cmd_kite_login(a):
     from .data import load_env
     from .data.kite import interactive_login
@@ -262,8 +336,16 @@ def build_parser() -> argparse.ArgumentParser:
         return p
 
     cmd("init", cmd_init, "write a commented example strategy file")
-    p = cmd("fetch", cmd_fetch, "download new daily candles into the local database")
-    p.add_argument("--full", action="store_true", help="re-download full history for every symbol")
+    p = cmd("fetch", cmd_fetch, "download new candles into the local database (resumable)")
+    p.add_argument("--full", action="store_true", help="re-download full daily history for every symbol")
+    p.add_argument("--intraday", action="store_true", help="also download intraday candles (default 5minute)")
+    p.add_argument("--no-intraday", action="store_true", help="skip intraday even if [data] intraday is set")
+    p.add_argument("--intraday-only", action="store_true", help="only the intraday candles")
+
+    p = sub.add_parser("universe", help="build the all-NSE stock list with cap class and industry")
+    p.add_argument("action", choices=["build"])
+    p.add_argument("--out", default="data/universes/nse_all.csv")
+    p.set_defaults(func=cmd_universe)
 
     p = cmd("db", cmd_db, "inspect the local market database")
     p.add_argument("action", choices=["status", "log", "sql", "import-parquet"])
@@ -315,6 +397,14 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("docs", help="serve the architecture page locally")
     p.add_argument("--port", type=int, default=8000)
     p.set_defaults(func=cmd_docs)
+
+    p = cmd("research", cmd_research, "test every strategy on every stock; split results by stock type")
+    p.add_argument("--start")
+    p.add_argument("--end")
+    p.add_argument("--strategy", action="append", help="only these strategies (repeatable)")
+    p.add_argument("--by", nargs="*", default=["cap", "price", "turnover"],
+                   help="factors to print: price volume turnover cap industry volatility momentum trend market "
+                        "weekday month")
 
     p = sub.add_parser("kite-login", help="generate today's Kite access token")
     p.set_defaults(func=cmd_kite_login)

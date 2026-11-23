@@ -17,10 +17,12 @@ from pathlib import Path
 
 import pandas as pd
 
-from .base import DataProvider, require_env
+from .base import DataProvider, require_env, with_retry
 
 TOKEN_FILE = Path(".secrets/kite_access_token")
 MAX_DAYS_PER_CALL = 2000  # Kite limit for the "day" interval
+INTRADAY_DAYS = {"minute": 60, "3minute": 100, "5minute": 100, "10minute": 100, "15minute": 200,
+                 "30minute": 200, "60minute": 400}  # Kite's max days per request by interval
 MIN_INTERVAL_S = 0.35  # historical API allows ~3 requests/second
 
 
@@ -68,18 +70,26 @@ class KiteProvider(DataProvider):
         except KeyError:
             raise KeyError(f"{symbol} not found in {self.exchange} instrument dump") from None
 
-    def daily(self, symbol: str, start: date, end: date) -> pd.DataFrame:
+    def _candles(self, symbol: str, start, end, interval: str, max_days: int) -> pd.DataFrame | None:
         tok = self.token(symbol)
         chunks, cur = [], pd.Timestamp(start).date()
         end = pd.Timestamp(end).date()
         while cur <= end:
-            to = min(cur + timedelta(days=MAX_DAYS_PER_CALL - 1), end)
+            to = min(cur + timedelta(days=max_days - 1), end)
             wait = MIN_INTERVAL_S - (time.monotonic() - self._last)
             if wait > 0:
                 time.sleep(wait)
-            rows = self.kite.historical_data(tok, cur, to, "day")
+            rows = with_retry(self.kite.historical_data, tok, cur, to, interval)
             self._last = time.monotonic()
             if rows:
                 chunks.append(pd.DataFrame(rows).set_index("date"))
             cur = to + timedelta(days=1)
-        return self.normalize(pd.concat(chunks) if chunks else None)
+        return pd.concat(chunks) if chunks else None
+
+    def daily(self, symbol: str, start: date, end: date) -> pd.DataFrame:
+        return self.normalize(self._candles(symbol, start, end, "day", MAX_DAYS_PER_CALL))
+
+    def intraday(self, symbol: str, start: date, end: date, interval: str = "5minute") -> pd.DataFrame:
+        if interval not in INTRADAY_DAYS:
+            raise ValueError(f"interval must be one of {', '.join(INTRADAY_DAYS)}")
+        return self.normalize_intraday(self._candles(symbol, start, end, interval, INTRADAY_DAYS[interval]))

@@ -44,6 +44,7 @@ def _builders(p: Panel) -> dict[str, Callable]:
         "rsi": lambda x, n=14: ind.rsi(x, _n(n)),
         "roc": lambda x, n: ind.roc(x, _n(n)),
         "atr": lambda n=14: ind.atr(h, l, c, _n(n)),
+        "stdev": lambda x, n: x.rolling(_n(n), min_periods=_n(n)).std(),
         "highest": lambda x, n: ind.highest(x, _n(n)),
         "lowest": lambda x, n: ind.lowest(x, _n(n)),
         "prev": lambda x, n=1: x.shift(_n(n)),
@@ -145,6 +146,7 @@ class Evaluator:
         raise ExprError(f"construct not allowed in {src!r}: {ast.dump(node)[:60]}")
 
 
-FUNCTIONS = ["sma(x, n)", "ema(x, n)", "rsi(x, n=14)", "roc(x, n)", "atr(n=14)", "highest(x, n)", "lowest(x, n)",
+FUNCTIONS = ["sma(x, n)", "ema(x, n)", "stdev(x, n)", "rsi(x, n=14)", "roc(x, n)", "atr(n=14)", "highest(x, n)",
+             "lowest(x, n)",
              "prev(x, n=1)", "avg_volume(n=20)", "turnover(n=20)", "supertrend(n=10, m=3)",
              "supertrend_dir(n=10, m=3)", "crossover(a, b)", "crossunder(a, b)", "max(a, b)", "min(a, b)", "abs(x)"]

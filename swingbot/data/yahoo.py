@@ -38,3 +38,35 @@ class YahooProvider(DataProvider):
             start=str(start), end=str(pd.Timestamp(end).date() + timedelta(days=1)), auto_adjust=False, actions=False
         )
         return self.normalize(df)
+
+    def daily_many(self, symbols: list[str], start: date, end: date, chunk: int = 100) -> dict[str, pd.DataFrame]:
+        """Bulk download (one request per ~100 tickers) -- minutes instead of an hour for all of NSE."""
+        import yfinance as yf
+
+        logging.getLogger("yfinance").setLevel(logging.CRITICAL)
+        out: dict[str, pd.DataFrame] = {}
+        for i in range(0, len(symbols), chunk):
+            part = symbols[i:i + chunk]
+            tick = {self.ticker(s): s for s in part}
+            raw = yf.download(list(tick), start=str(start), end=str(pd.Timestamp(end).date() + timedelta(days=1)),
+                              auto_adjust=False, actions=False, group_by="ticker", threads=True, progress=False)
+            for t, s in tick.items():
+                try:
+                    df = raw[t] if len(tick) > 1 else raw
+                except KeyError:
+                    continue
+                df = self.normalize(df.dropna(how="all"))
+                if not df.empty:
+                    out[s] = df
+        return out
+
+    def intraday(self, symbol: str, start: date, end: date, interval: str = "5minute") -> pd.DataFrame:
+        """Yahoo keeps only the last ~60 days of 5-minute candles."""
+        import yfinance as yf
+
+        yi = {"minute": "1m", "5minute": "5m", "15minute": "15m", "30minute": "30m", "60minute": "60m"}[interval]
+        earliest = date.today() - timedelta(days=59)
+        df = yf.Ticker(self.ticker(symbol)).history(start=str(max(pd.Timestamp(start).date(), earliest)),
+                                                    end=str(pd.Timestamp(end).date() + timedelta(days=1)),
+                                                    interval=yi, auto_adjust=False, actions=False)
+        return self.normalize_intraday(df)

@@ -137,6 +137,8 @@ class DataConfig:
     universe: str = "nifty50"
     start: str = "2008-01-01"  # history to download / backtest from
     db: str = "data/market.duckdb"  # local market database
+    intraday: str | None = None  # also store intraday candles, e.g. "5minute" (Kite: history back to 2015+)
+    intraday_start: str | None = None  # default: same as start
 
 
 @dataclass
