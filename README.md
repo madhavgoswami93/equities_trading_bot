@@ -24,19 +24,25 @@ strategies.toml ──► backtest ──► paper (live data, simulated fills) 
 * **Speed:** 500 stocks × 20 years × 3 strategies simulates in about 30 ms after the first compile.
   Parameter sweeps run in parallel.
 
-## How many APIs do you need? One broker, plus free history
+## One API: pick your broker
 
-You need **one broker API** for orders. Long price history is filled into a local database once,
-from a free source, and the broker keeps it current from then on.
+Set one line at the top of `strategies.toml`, and prices, history and orders all come from that broker:
 
-| Setup | Daily data + orders | Long history (one-off) | Cost per month |
+```toml
+broker = "kite"     # or "groww"
+```
+
+| `broker =` | Data + orders | Daily history for backtests | Cost per month |
 |---|---|---|---|
-| **Groww only** | Groww Trade API (one plan covers data **and** orders) | Yahoo (free) | ~₹499 + GST |
-| **Kite, cheapest** | Yahoo EOD data + Kite Personal (orders, GTT, holdings) | Yahoo (free) | ₹0 |
-| **Kite with its own data** | Kite Connect (data + orders) | Kite or Yahoo | ~₹500 |
+| `"kite"` (Connect plan) | Kite | 10+ years, adjusted for splits and bonuses | ~₹500 |
+| `"groww"` | Groww | From ~2020 only (about 6 years) | ~₹499 + GST |
+| *(no broker line)* | Yahoo, research and paper only | 15+ years, free, unofficial | ₹0 |
 
-Groww's candles only go back to about 2020, which is too short for a robust swing backtest.
-Keep `history_provider = "yahoo"` for the backfill and `provider = "groww"` for daily updates.
+Without Nifty index candles from the broker (Groww), the market filter uses an equal-weight
+index of your stock list instead. To backtest further back than Groww allows, add
+`history_provider = "yahoo"` under `[data]`: the one-off backfill then comes from Yahoo, and daily
+updates still come from your broker.
+
 SEBI's retail algo framework (in force from April 2026) requires API orders to come from a static IP
 registered with your broker, whichever broker you use. Broker pricing changes often, so check
 each broker's own page before you subscribe.

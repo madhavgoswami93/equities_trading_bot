@@ -76,3 +76,16 @@ def test_rule_strategy_matches_builtin_pullback():
     a, b = Backtest(p, builtin).run().trades, Backtest(p, rules).run().trades
     pd.testing.assert_frame_equal(a.drop(columns="strategy"), b.drop(columns="strategy"))
     assert rules.with_params(x=5).params == {"x": 5}
+
+
+def test_single_broker_drives_data_and_orders(tmp_path):
+    f = tmp_path / "s.toml"
+    f.write_text('broker = "groww"\n[data]\nuniverse = "nifty50"\n[[strategy]]\nname = "x"\ntype = "breakout"\n')
+    cfg = load_config(f)
+    assert (cfg.data.provider, cfg.live.broker, cfg.data.history_provider) == ("groww", "groww", None)
+    f.write_text('broker = "kite"\n[data]\nhistory_provider = "yahoo"\n[[strategy]]\nname = "x"\ntype = "breakout"\n')
+    cfg = load_config(f)
+    assert (cfg.data.provider, cfg.live.broker, cfg.data.history_provider) == ("kite", "kite", "yahoo")
+    f.write_text('broker = "upstox"\n[[strategy]]\nname = "x"\ntype = "breakout"\n')
+    with pytest.raises(ValueError, match="broker must be"):
+        load_config(f)

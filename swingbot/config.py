@@ -129,8 +129,8 @@ def specs_param_array(specs: list[StrategySpec], signals) -> np.ndarray:
 # --------------------------------------------------------------- data / live
 @dataclass
 class DataConfig:
-    provider: str = "yahoo"  # daily updates: yahoo | groww | kite (usually your broker)
-    history_provider: str | None = None  # one-off long backfill; default = provider (yahoo is free, 15+ yrs)
+    provider: str = "yahoo"  # daily updates: yahoo | groww | kite (normally set by the top-level `broker`)
+    history_provider: str | None = None  # one-off backfill; default = provider. "yahoo" = free 15+ years
     universe: str = "nifty50"
     start: str = "2008-01-01"  # history to download / backtest from
     db: str = "data/market.duckdb"  # local market database
@@ -206,6 +206,13 @@ def _build_strategy(d: dict) -> StrategySpec:
 def load_config(path: str | Path) -> RunConfig:
     path = Path(path)
     raw = tomllib.loads(path.read_text())
+    data, live = dict(raw.get("data", {})), dict(raw.get("live", {}))
+    broker = raw.get("broker")
+    if broker:  # one API for everything: prices, history and orders come from the same broker
+        if broker not in ("kite", "groww"):
+            raise ValueError(f"{path}: broker must be 'kite' or 'groww', not {broker!r}")
+        data.setdefault("provider", broker)
+        live.setdefault("broker", broker)
     strategies = [_build_strategy(s) for s in raw.get("strategy", [])]
     if not strategies:
         raise ValueError(f"{path}: define at least one [[strategy]]")
@@ -214,9 +221,9 @@ def load_config(path: str | Path) -> RunConfig:
         raise ValueError(f"{path}: strategy names must be unique")
     return RunConfig(
         name=raw.get("name", path.stem),
-        data=DataConfig(**raw.get("data", {})),
+        data=DataConfig(**data),
         risk=RiskConfig(**raw.get("risk", {})),
-        live=LiveConfig(**raw.get("live", {})),
+        live=LiveConfig(**live),
         strategies=strategies,
         alerts=AlertsConfig(**raw.get("alerts", {})),
         runs_dir=raw.get("runs_dir", "runs"),

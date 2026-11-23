@@ -96,6 +96,14 @@ class Panel:
             benchmark=self.benchmark, benchmark_name=self.benchmark_name,
         )
 
+    def equal_weight_index(self, base: float = 1000.0) -> np.ndarray:
+        """Equal-weight index of the universe (mean daily return of the stocks trading
+        that day). Stands in for Nifty when the data source has no index candles."""
+        rets = np.nanmean(np.where(np.isfinite(self.close[1:] / self.close[:-1]),
+                                   self.close[1:] / self.close[:-1] - 1, np.nan), axis=1)
+        rets = np.nan_to_num(rets, nan=0.0)
+        return base * np.concatenate([[1.0], np.cumprod(1 + rets)])
+
     # --------------------------------------------------------------- quality
     def quality_report(self, gap_threshold: float = 0.35) -> pd.DataFrame:
         """Flag suspicious data: non-positive prices, high<low, and huge overnight

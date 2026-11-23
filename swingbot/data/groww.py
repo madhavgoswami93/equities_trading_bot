@@ -25,6 +25,7 @@ import pandas as pd
 from .base import DataProvider, require_env
 
 MAX_DAYS_PER_CALL = 180
+EARLIEST = date(2020, 1, 1)  # Groww serves equity daily candles from 2020
 MIN_INTERVAL_S = 0.2
 
 
@@ -55,7 +56,7 @@ class GrowwProvider(DataProvider):
 
     def daily(self, symbol: str, start: date, end: date) -> pd.DataFrame:
         g = self.g
-        chunks, cur = [], pd.Timestamp(start).date()
+        chunks, cur = [], max(pd.Timestamp(start).date(), EARLIEST)
         end = pd.Timestamp(end).date()
         while cur <= end:
             to = min(cur + timedelta(days=MAX_DAYS_PER_CALL - 1), end)

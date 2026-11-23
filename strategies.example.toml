@@ -8,9 +8,15 @@
 
 name = "core_swing"            # state goes to runs/<name>/{backtest,paper,live}/
 
+# One API for everything: prices, history and orders all come from this broker.
+#   "kite"  -- Kite Connect plan (~Rs 500/mo): data + orders, adjusted daily history for 10+ years
+#   "groww" -- Groww Trade API (~Rs 499/mo): data + orders, daily history only from ~2020
+# Delete this line to research for free on Yahoo data without any broker account.
+# broker = "kite"
+
 [data]
-provider = "yahoo"             # daily updates: yahoo (free) | groww | kite -- usually your broker
-history_provider = "yahoo"     # one-off long backfill (Yahoo: free, 15+ years, split-adjusted)
+# provider = "yahoo"           # without `broker`: free Yahoo data (the default)
+# history_provider = "yahoo"   # optional: backfill long history from Yahoo even with a broker
 universe = "nifty50"           # data/universes/<name>.csv, a CSV path, or "RELIANCE,TCS,INFY"
 start = "2008-01-01"           # history to download and backtest from
 db = "data/market.duckdb"      # local market database (one file; back it up)
@@ -32,7 +38,6 @@ halt_cooldown = 20             # ...for 20 sessions, then reset the peak and res
 costs = "zerodha"              # zerodha | groww | free
 
 [live]
-broker = "kite"                # kite (orders free on the Personal plan) | groww (one paid plan: data + orders)
 dry_run = true                 # set to false AND pass --send to place real orders
 stop_limit_buffer = 0.01       # GTT stop sells with a limit 1% under the trigger
 

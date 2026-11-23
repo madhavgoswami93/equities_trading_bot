@@ -62,3 +62,11 @@ def test_load_panel_from_db(tmp_path):
     p = load_panel(["AAA", "BBB", "ZZZ"], db=db)
     assert p.symbols == ["AAA", "BBB"] and p.benchmark is not None
     assert np.isnan(p.close[0, 1]) and p.close[-1, 0] == 149.0
+
+
+def test_equal_weight_benchmark_when_index_missing(tmp_path):
+    db = MarketDB(tmp_path / "m.duckdb")
+    db.upsert("AAA", bars("2022-01-03", 30), "groww")
+    db.upsert("BBB", bars("2022-01-03", 30, 50.0), "groww")
+    p = load_panel(["AAA", "BBB"], db=db)
+    assert p.benchmark_name == "EQUAL_WEIGHT" and p.benchmark[0] == 1000.0 and p.benchmark[-1] > 1000.0

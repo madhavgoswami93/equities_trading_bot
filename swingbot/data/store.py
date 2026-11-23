@@ -222,9 +222,12 @@ def load_panel(symbols: list[str], start=None, end=None, db: MarketDB | None = N
         b = db.read(BENCHMARK, start, end)
         if b is not None:
             bench = b["close"]
-        else:
-            log.warning("benchmark %s not in the database -- regime filter disabled", BENCHMARK)
-    return Panel.from_frames(frames, benchmark=bench, benchmark_name=BENCHMARK, start=start, end=end)
+    panel = Panel.from_frames(frames, benchmark=bench, benchmark_name=BENCHMARK, start=start, end=end)
+    if benchmark and bench is None:
+        log.info("no %s index in %s (Groww has no index candles): using an equal-weight index of the "
+                 "universe as the benchmark", BENCHMARK, db.path)
+        panel.benchmark, panel.benchmark_name = panel.equal_weight_index(), "EQUAL_WEIGHT"
+    return panel
 
 
 def import_parquet(db: MarketDB, cache_root: str | Path = "data/cache") -> int:
