@@ -1,0 +1,92 @@
+# ============================================================================
+#  swingbot strategy file
+#  One file drives everything:
+#     python -m swingbot backtest strategies.toml
+#     python -m swingbot paper    strategies.toml     (daily, after 15:45 IST)
+#     python -m swingbot live     strategies.toml     (daily; dry run until enabled)
+# ============================================================================
+
+name = "core_swing"            # state goes to runs/<name>/{backtest,paper,live}/
+
+[data]
+provider = "yahoo"             # yahoo (free) | kite (Connect plan) | groww (paid)
+universe = "nifty50"           # data/universes/<name>.csv, a CSV path, or "RELIANCE,TCS,INFY"
+start = "2008-01-01"           # history to download and backtest from
+# benchmark_provider = "yahoo" # where the Nifty index comes from (regime filter)
+
+# ---------------------------------------------------------------------------
+#  Risk rules -- enforced by the engine for ALL strategies together.
+#  A strategy's own quantity is always capped by these.
+# ---------------------------------------------------------------------------
+[risk]
+capital = 1000000              # capital allocated to the bot (Rs)
+max_positions = 5              # never more than 5 open positions at once
+max_position_pct = 0.40        # no single position above 40% of equity
+risk_per_trade = 0.01          # default for quantity = "risk": lose 1% of equity if the stop hits
+max_adv_pct = 0.02             # buy at most 2% of the stock's 20-day average traded value
+max_entry_gap = 0.05           # entry = limit at signal close +5%; bigger gap-ups are skipped
+slippage_bps = 10              # per side
+max_drawdown_halt = 0.15       # equity >15% below its peak -> pause new trades (0 = off)
+halt_cooldown = 20             # ...for 20 sessions, then reset the peak and resume
+costs = "zerodha"              # zerodha | groww | free
+
+[live]
+broker = "kite"                # orders via Zerodha Kite (free "Personal" API plan)
+dry_run = true                 # set to false AND pass --send to place real orders
+stop_limit_buffer = 0.01       # GTT stop sells with a limit 1% under the trigger
+
+# ---------------------------------------------------------------------------
+#  Strategies. Write signals as expressions (type = "rules") or use a built-in
+#  (type = "pullback" | "breakout" | "supertrend").
+#
+#  Expression variables : open high low close volume + anything in `params`
+#  Functions            : sma(x,n) ema(x,n) rsi(x,n) roc(x,n) atr(n) highest(x,n) lowest(x,n)
+#                         prev(x,n) avg_volume(n) turnover(n) supertrend(n,m) supertrend_dir(n,m)
+#                         crossover(a,b) crossunder(a,b) max(a,b) min(a,b) abs(x)
+#  Logic                : and or not  < <= > >= == !=  + - * / **
+#
+#  entry     condition at the close -> buy at the next open
+#  exit      condition at the close -> sell at the next open (optional)
+#  stop      initial stop DISTANCE below the fill, in Rs        (required)
+#  trail     trailing-stop distance below the highest close     (optional)
+#  score     ranking when signals exceed free slots (higher first)
+#  quantity  "risk"  |  "risk 0.5%"  |  "equity 20%"  |  "shares 50"  |  "amount 100000"
+#  target_r  take profit at entry + target_r x stop distance    (0 = off)
+#  min_hold  sessions before an `exit` signal is honoured (stops always are)
+#  max_hold  time stop in sessions (15 ~ 3 weeks)
+#  priority  lower number is served first when slots are scarce
+#  max_positions  cap for this strategy inside the global limit (0 = none)
+# ---------------------------------------------------------------------------
+
+[[strategy]]
+name = "trend_dip"
+type = "rules"
+entry = "close > sma(close, 200) and sma(close, 50) > sma(close, 200) and rsi(close, 3) < rsi_entry"
+exit = "rsi(close, 3) > 70"
+stop = "3 * atr(14)"
+score = "roc(close, 126)"
+quantity = "risk 1%"
+max_hold = 15
+priority = 1
+params = { rsi_entry = 5 }
+
+[[strategy]]
+name = "volume_breakout"
+type = "rules"
+entry = "close > prev(highest(high, 20)) and volume > 1.5 * avg_volume(20) and close > sma(close, 50)"
+stop = "2 * atr(14)"
+trail = "3 * atr(14)"
+score = "roc(close, 63)"
+quantity = "equity 20%"
+max_hold = 15
+priority = 2
+max_positions = 2
+
+[[strategy]]
+name = "supertrend_builtin"
+type = "supertrend"            # built-in strategy, parameters set directly
+st_len = 10
+st_mult = 3.0
+quantity = "risk 0.75%"
+priority = 3
+enabled = false                # kept in the file, switched off

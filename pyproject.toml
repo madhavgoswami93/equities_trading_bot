@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "swingbot"
+version = "0.2.0"
+description = "Swing-trading engine for NSE equities: one strategy file -> backtest, paper, live (Zerodha Kite)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "pyarrow>=14",
+    "numba>=0.59",
+]
+
+[project.optional-dependencies]
+kite = ["kiteconnect>=5"]
+groww = ["growwapi", "pyotp"]
+yahoo = ["yfinance>=0.2.40"]
+plot = ["matplotlib>=3.8"]
+dashboard = ["streamlit>=1.40", "plotly>=5.20"]
+dev = ["pytest>=8", "ruff>=0.5"]
+all = ["swingbot[kite,groww,yahoo,plot,dashboard,dev]"]
+
+[project.scripts]
+swingbot = "swingbot.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["swingbot*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: runs the engine without numba in a subprocess"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
